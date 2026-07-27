@@ -21,6 +21,7 @@ $category = $post !== null ? strtoupper((string) ($post['category'] ?? '')) : ''
 $isAllowedCategory = $post !== null && in_array($category, $articleAllowedCategories, true);
 $found = $post !== null
     && !empty($post['published'])
+    && !posts_is_trashed($post)
     && $isAllowedCategory;
 
 $pageTitle = $found
@@ -41,7 +42,8 @@ if ($found) {
 [$badgeLabel] = $found
     ? cs_parse_agency($post['agency'] ?? null, $category)
     : ['', null];
-$badgeClass = $found ? cs_badge_class($badgeLabel) : 'badge--default';
+$badgeClass = $found ? 'badge--category' : 'badge--default';
+$catColor = $found ? category_color($category) : '#554335';
 
 $hasImage = $found && !empty($post['image_path']);
 
@@ -53,6 +55,10 @@ if ($found && !empty($articleShowValidMeta)) {
     $recorded = cs_format_event_time($recordedAt !== '' ? $recordedAt : null);
     $expires = cs_format_event_time($expiresAt !== '' ? $expiresAt : null, true);
 }
+
+$og = $found
+    ? settings_resolve_og($post, site_url('article/' . (cs_is_weather_category($category) ? 'weather' : 'news') . '.php?id=' . $id))
+    : settings_resolve_og(null, site_url());
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -60,6 +66,7 @@ if ($found && !empty($articleShowValidMeta)) {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title><?= e($pageTitle) ?></title>
+  <?php require __DIR__ . '/og_meta.php'; ?>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
@@ -86,7 +93,7 @@ if ($found && !empty($articleShowValidMeta)) {
         <div class="article__body">
           <div class="article__meta">
             <div class="article__meta-left">
-              <span class="badge <?= e($badgeClass) ?>"><?= e($badgeLabel) ?></span>
+              <span class="badge <?= e($badgeClass) ?>" style="--cat-color: <?= e($catColor) ?>"><?= e($badgeLabel) ?></span>
             </div>
           </div>
           <h1 class="article__title"><?= e((string) $post['title']) ?></h1>

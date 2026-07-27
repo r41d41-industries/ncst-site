@@ -2,52 +2,6 @@
 
 declare(strict_types=1);
 
-/** Filter categories shown in the public UI (Figma). */
-const CS_FILTER_CATEGORIES = ['ALL', 'NEWS', 'UPDATES', 'TRAFFIC', 'CRIME', 'FIRE', 'WEATHER'];
-
-/** Allowed category values for posts. */
-const CS_POST_CATEGORIES = [
-    'NEWS', 'UPDATES', 'TRAFFIC', 'CRIME', 'FIRE', 'WEATHER',
-];
-
-/** Categories that use the full incident card layout (image + updates + agencies). */
-const CS_INCIDENT_CATEGORIES = ['CRIME', 'FIRE', 'TRAFFIC'];
-
-/** Categories that use the weather/bulletin card (image + body + read-more + VALID range). */
-const CS_WEATHER_CATEGORIES = ['WEATHER'];
-
-/** Categories that use the news card (image + body + optional read-more). */
-const CS_NEWS_CATEGORIES = ['NEWS', 'UPDATES'];
-
-function cs_is_incident_category(string $category): bool
-{
-    return in_array(strtoupper($category), CS_INCIDENT_CATEGORIES, true);
-}
-
-function cs_is_weather_category(string $category): bool
-{
-    return in_array(strtoupper($category), CS_WEATHER_CATEGORIES, true);
-}
-
-function cs_is_news_category(string $category): bool
-{
-    return in_array(strtoupper($category), CS_NEWS_CATEGORIES, true);
-}
-
-function cs_post_layout_label(string $category): string
-{
-    if (cs_is_incident_category($category)) {
-        return 'incident layout';
-    }
-    if (cs_is_weather_category($category)) {
-        return 'weather layout';
-    }
-    if (cs_is_news_category($category)) {
-        return 'news layout';
-    }
-    return 'news layout';
-}
-
 function posts_table(): string
 {
     return cs_table('posts');
@@ -173,7 +127,7 @@ function posts_delete_update(int $updateId, int $postId): void
 function posts_list_published(?string $category = null, ?int $limit = null, int $offset = 0): array
 {
     $table = posts_table();
-    $sql = "SELECT * FROM `{$table}` WHERE published = 1";
+    $sql = "SELECT * FROM `{$table}` WHERE published = 1 AND trashed_at IS NULL";
     $params = [];
 
     if ($category !== null && $category !== '' && strtoupper($category) !== 'ALL') {
@@ -193,7 +147,7 @@ function posts_list_published(?string $category = null, ?int $limit = null, int 
 function posts_count_published(?string $category = null): int
 {
     $table = posts_table();
-    $sql = "SELECT COUNT(*) FROM `{$table}` WHERE published = 1";
+    $sql = "SELECT COUNT(*) FROM `{$table}` WHERE published = 1 AND trashed_at IS NULL";
     $params = [];
 
     if ($category !== null && $category !== '' && strtoupper($category) !== 'ALL') {
@@ -207,13 +161,124 @@ function posts_count_published(?string $category = null): int
 }
 
 /**
+ * Admin list: optional category + status (draft|published|trash).
+ * Default (no status) excludes trash.
+ *
  * @return list<array<string, mixed>>
  */
-function posts_list_all(): array
+function posts_list_all(?string $category = null, ?string $status = null): array
 {
     $table = posts_table();
-    $stmt = db()->query("SELECT * FROM `{$table}` ORDER BY created_at DESC, id DESC");
+    $sql = "SELECT * FROM `{$table}` WHERE 1=1";
+    $params = [];
+
+    $status = $status !== null ? strtolower(trim($status)) : null;
+    if ($status === 'draft') {
+        $sql .= ' AND published = 0 AND trashed_at IS NULL';
+    } elseif ($status === 'published') {
+        $sql .= ' AND published = 1 AND trashed_at IS NULL';
+    } elseif ($status === 'trash') {
+        $sql .= ' AND trashed_at IS NOT NULL';
+    } else {
+        $sql .= ' AND trashed_at IS NULL';
+    }
+
+    if ($category !== null && $category !== '' && strtoupper($category) !== 'ALL') {
+        $sql .= ' AND category = ?';
+        $params[] = strtoupper($category);
+    }
+
+    $sql .= ' ORDER BY created_at DESC, id DESC';
+    $stmt = db()->prepare($sql);
+    $stmt->execute($params);
     return $stmt->fetchAll();
+}
+
+/**
+ * Counts for Library status links.
+ *
+ * @return array{all: int, draft: int, published: int, trash: int}
+ */
+function posts_status_counts(): array
+{
+    $table = posts_table();
+    $row = db()->query(
+        "SELECT
+            SUM(CASE WHEN trashed_at IS NULL THEN 1 ELSE 0 END) AS all_count,
+            SUM(CASE WHEN published = 0 AND trashed_at IS NULL THEN 1 ELSE 0 END) AS draft_count,
+            SUM(CASE WHEN published = 1 AND trashed_at IS NULL THEN 1 ELSE 0 END) AS published_count,
+            SUM(CASE WHEN trashed_at IS NOT NULL THEN 1 ELSE 0 END) AS trash_count
+         FROM `{$table}`"
+    )->fetch();
+
+    return [
+        'all' => (int) ($row['all_count'] ?? 0),
+        'draft' => (int) ($row['draft_count'] ?? 0),
+        'published' => (int) ($row['published_count'] ?? 0),
+        'trash' => (int) ($row['trash_count'] ?? 0),
+    ];
+}
+
+function posts_is_trashed(array $post): bool
+{
+    $trashed = $post['trashed_at'] ?? null;
+    return $trashed !== null && trim((string) $trashed) !== '';
+}
+
+function posts_trash(int $id): void
+{
+    $table = posts_table();
+    $stmt = db()->prepare(
+        "UPDATE `{$table}` SET trashed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+    );
+    $stmt->execute([$id]);
+}
+
+function posts_restore(int $id): void
+{
+    $table = posts_table();
+    $stmt = db()->prepare(
+        "UPDATE `{$table}` SET trashed_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+    );
+    $stmt->execute([$id]);
+}
+
+function posts_delete(int $id): void
+{
+    $updates = posts_updates_table();
+    $stmtUpdates = db()->prepare("DELETE FROM `{$updates}` WHERE post_id = ?");
+    $stmtUpdates->execute([$id]);
+
+    $table = posts_table();
+    $stmt = db()->prepare("DELETE FROM `{$table}` WHERE id = ?");
+    $stmt->execute([$id]);
+}
+
+/**
+ * Permanently delete every trashed post (and their updates).
+ *
+ * @return int Number of posts deleted
+ */
+function posts_empty_trash(): int
+{
+    $table = posts_table();
+    $updates = posts_updates_table();
+
+    $ids = db()->query("SELECT id FROM `{$table}` WHERE trashed_at IS NOT NULL")->fetchAll(PDO::FETCH_COLUMN);
+    if ($ids === []) {
+        return 0;
+    }
+
+    $ids = array_map('intval', $ids);
+    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+
+    $stmtUpdates = db()->prepare("DELETE FROM `{$updates}` WHERE post_id IN ({$placeholders})");
+    $stmtUpdates->execute($ids);
+
+    $stmt = db()->prepare("DELETE FROM `{$table}` WHERE id IN ({$placeholders})");
+    $stmt->execute($ids);
+
+    return count($ids);
 }
 
 function posts_find(int $id): ?array
@@ -238,11 +303,13 @@ function posts_create(array $data): int
     $sql = "INSERT INTO `{$table}` (
         category, title, body, article_body, update_label, update_text,
         agency, dispatched_at, cleared_at, recorded_at, expires_at, dispatched_text, status_text,
-        image_path, facebook_url, x_url, read_more_url, published
+        image_path, image_media_id, facebook_url, x_url, read_more_url,
+        og_title, og_description, og_image_path, og_image_media_id, published
     ) VALUES (
         :category, :title, :body, :article_body, :update_label, :update_text,
         :agency, :dispatched_at, :cleared_at, :recorded_at, :expires_at, :dispatched_text, :status_text,
-        :image_path, :facebook_url, :x_url, :read_more_url, :published
+        :image_path, :image_media_id, :facebook_url, :x_url, :read_more_url,
+        :og_title, :og_description, :og_image_path, :og_image_media_id, :published
     )";
     $stmt = db()->prepare($sql);
     $stmt->execute([
@@ -260,9 +327,14 @@ function posts_create(array $data): int
         ':dispatched_text' => $data['dispatched_text'] ?? null,
         ':status_text' => $data['status_text'] ?? null,
         ':image_path' => $data['image_path'] ?? null,
+        ':image_media_id' => $data['image_media_id'] ?? null,
         ':facebook_url' => $data['facebook_url'] ?? null,
         ':x_url' => $data['x_url'] ?? null,
         ':read_more_url' => $data['read_more_url'] ?? null,
+        ':og_title' => $data['og_title'] ?? null,
+        ':og_description' => $data['og_description'] ?? null,
+        ':og_image_path' => $data['og_image_path'] ?? null,
+        ':og_image_media_id' => $data['og_image_media_id'] ?? null,
         ':published' => !empty($data['published']) ? 1 : 0,
     ]);
     return (int) db()->lastInsertId();
@@ -289,9 +361,14 @@ function posts_update(int $id, array $data): void
         dispatched_text = :dispatched_text,
         status_text = :status_text,
         image_path = :image_path,
+        image_media_id = :image_media_id,
         facebook_url = :facebook_url,
         x_url = :x_url,
         read_more_url = :read_more_url,
+        og_title = :og_title,
+        og_description = :og_description,
+        og_image_path = :og_image_path,
+        og_image_media_id = :og_image_media_id,
         published = :published,
         updated_at = CURRENT_TIMESTAMP
     WHERE id = :id";
@@ -312,111 +389,44 @@ function posts_update(int $id, array $data): void
         ':dispatched_text' => $data['dispatched_text'] ?? null,
         ':status_text' => $data['status_text'] ?? null,
         ':image_path' => $data['image_path'] ?? null,
+        ':image_media_id' => $data['image_media_id'] ?? null,
         ':facebook_url' => $data['facebook_url'] ?? null,
         ':x_url' => $data['x_url'] ?? null,
         ':read_more_url' => $data['read_more_url'] ?? null,
+        ':og_title' => $data['og_title'] ?? null,
+        ':og_description' => $data['og_description'] ?? null,
+        ':og_image_path' => $data['og_image_path'] ?? null,
+        ':og_image_media_id' => $data['og_image_media_id'] ?? null,
         ':published' => !empty($data['published']) ? 1 : 0,
     ]);
 }
 
-function posts_delete(int $id): void
-{
-    $table = posts_table();
-    $stmt = db()->prepare("DELETE FROM `{$table}` WHERE id = ?");
-    $stmt->execute([$id]);
-}
-
 /**
- * Detect an uploaded image MIME type without requiring fileinfo.
- * Prefers finfo, then mime_content_type(), then getimagesize() / extension allowlist.
+ * Detect an uploaded image MIME type (delegates to media library).
  */
 function posts_detect_upload_mime(string $tmpPath, string $originalName = ''): ?string
 {
-    $allowed = [
-        'image/jpeg' => true,
-        'image/png' => true,
-        'image/webp' => true,
-        'image/gif' => true,
-    ];
-
-    if (class_exists('finfo')) {
-        $finfo = new finfo(FILEINFO_MIME_TYPE);
-        $mime = $finfo->file($tmpPath);
-        if (is_string($mime) && isset($allowed[$mime])) {
-            return $mime;
-        }
-    }
-
-    if (function_exists('mime_content_type')) {
-        $mime = @mime_content_type($tmpPath);
-        if (is_string($mime) && isset($allowed[$mime])) {
-            return $mime;
-        }
-    }
-
-    // Fallback when fileinfo is unavailable: extension allowlist + getimagesize().
-    $extMap = [
-        'jpg' => 'image/jpeg',
-        'jpeg' => 'image/jpeg',
-        'png' => 'image/png',
-        'webp' => 'image/webp',
-        'gif' => 'image/gif',
-    ];
-    $ext = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
-    if ($ext === '' || !isset($extMap[$ext])) {
+    $mime = media_detect_mime($tmpPath, $originalName);
+    if ($mime === null || !str_starts_with($mime, 'image/')) {
         return null;
     }
-
-    $info = @getimagesize($tmpPath);
-    if (!is_array($info) || !isset($info['mime']) || $info['mime'] !== $extMap[$ext]) {
-        return null;
-    }
-
-    return $info['mime'];
+    return $mime;
 }
 
 /**
- * Validate and store an uploaded image under assets/uploads/.
- * Returns relative path (assets/uploads/...) or null if no file.
+ * Validate and store an uploaded image via the media library.
+ * Returns relative path (assets/uploads/media/images/...) or existing path if no file.
+ * When a new file is stored, also returns media_id via $mediaIdOut.
  *
  * @param array<string, mixed> $file $_FILES entry
  */
-function posts_handle_upload(array $file, ?string $existingPath = null): ?string
+function posts_handle_upload(array $file, ?string $existingPath = null, ?int &$mediaIdOut = null): ?string
 {
     if (!isset($file['error']) || (int) $file['error'] === UPLOAD_ERR_NO_FILE) {
         return $existingPath;
     }
 
-    if ((int) $file['error'] !== UPLOAD_ERR_OK) {
-        throw new RuntimeException('Image upload failed.');
-    }
-
-    $maxBytes = 5 * 1024 * 1024;
-    if ((int) $file['size'] > $maxBytes) {
-        throw new RuntimeException('Image must be 5MB or smaller.');
-    }
-
-    $allowed = [
-        'image/jpeg' => 'jpg',
-        'image/png' => 'png',
-        'image/webp' => 'webp',
-        'image/gif' => 'gif',
-    ];
-    $mime = posts_detect_upload_mime($file['tmp_name'], (string) ($file['name'] ?? ''));
-    if ($mime === null || !isset($allowed[$mime])) {
-        throw new RuntimeException('Image must be JPEG, PNG, WebP, or GIF.');
-    }
-
-    $dir = dirname(__DIR__) . '/assets/uploads';
-    if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
-        throw new RuntimeException('Could not create uploads directory.');
-    }
-
-    $name = bin2hex(random_bytes(8)) . '.' . $allowed[$mime];
-    $dest = $dir . '/' . $name;
-    if (!move_uploaded_file($file['tmp_name'], $dest)) {
-        throw new RuntimeException('Could not save uploaded image.');
-    }
-
-    return 'assets/uploads/' . $name;
+    $row = media_store_upload($file, ['kind' => 'image']);
+    $mediaIdOut = (int) $row['id'];
+    return (string) $row['path'];
 }

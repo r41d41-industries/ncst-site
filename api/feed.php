@@ -10,8 +10,9 @@ header('Cache-Control: no-store');
 
 $pageSize = 4;
 $offset = isset($_GET['offset']) ? max(0, (int) $_GET['offset']) : 0;
+$filterCategories = cs_filter_category_slugs();
 $category = isset($_GET['category']) ? strtoupper(trim((string) $_GET['category'])) : 'ALL';
-if (!in_array($category, CS_FILTER_CATEGORIES, true)) {
+if (!in_array($category, $filterCategories, true)) {
     $category = 'ALL';
 }
 

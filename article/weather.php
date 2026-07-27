@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 require_once dirname(__DIR__) . '/includes/bootstrap.php';
 
-$articleAllowedCategories = CS_WEATHER_CATEGORIES;
+$articleAllowedCategories = category_slugs_by_template('weather');
 $articleKindLabel = 'Weather';
 $articleShowValidMeta = true;
 

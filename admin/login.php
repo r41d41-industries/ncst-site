@@ -9,52 +9,77 @@ if (auth_check()) {
 }
 
 $error = null;
+$flash = flash_get('auth_success');
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $username = trim((string) ($_POST['username'] ?? ''));
-    $password = (string) ($_POST['password'] ?? '');
-
-    if ($username === '' || $password === '') {
-        $error = 'Enter username and password.';
-    } elseif (auth_login($username, $password)) {
-        redirect('/admin/');
+    if (!csrf_verify($_POST['_csrf'] ?? null)) {
+        $error = 'Invalid session. Please try again.';
     } else {
-        $error = 'Invalid username or password.';
+        $username = trim((string) ($_POST['username'] ?? ''));
+        $password = (string) ($_POST['password'] ?? '');
+        $remember = !empty($_POST['remember']);
+
+        if ($username === '' || $password === '') {
+            $error = 'Enter username and password.';
+        } elseif (auth_login($username, $password, $remember)) {
+            redirect('/admin/');
+        } else {
+            $error = 'Invalid username or password.';
+        }
     }
 }
+
+$authPageTitle = 'Admin Login';
+require dirname(__DIR__) . '/includes/partials/admin_auth_start.php';
 ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Admin Login — NCST Main Feed</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&family=Open+Sans:wght@400;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/assets/css/main.css">
-</head>
-<body>
-  <div class="admin-wrap">
-    <div class="admin-card" style="max-width:420px;margin:48px auto;">
-      <h1>Admin Login</h1>
-      <p style="color:var(--muted-60);margin:0 0 16px;font-size:14px;">NCST Main Feed</p>
-      <?php if ($error): ?>
-        <div class="admin-flash admin-flash--error"><?= e($error) ?></div>
+    <div class="admin-auth__card tu-card">
+      <h1>Sign in</h1>
+      <p class="admin-auth__lead">Sign in to manage the scanner feed.</p>
+
+      <?php if ($flash): ?>
+        <div class="tu-alert tu-alert--success" role="status"><?= e($flash) ?></div>
       <?php endif; ?>
+      <?php if ($error): ?>
+        <div class="tu-alert tu-alert--danger" role="alert"><?= e($error) ?></div>
+      <?php endif; ?>
+
       <form method="post" action="/admin/login.php" autocomplete="username">
-        <div class="form-row">
-          <label for="username">Username</label>
-          <input id="username" name="username" type="text" required autofocus value="<?= e((string) ($_POST['username'] ?? '')) ?>">
+        <input type="hidden" name="_csrf" value="<?= e(csrf_token()) ?>">
+
+        <div class="tu-form-row">
+          <label for="username">Username <span class="tu-required" aria-hidden="true">*</span></label>
+          <div class="tu-input-icon">
+            <svg class="tu-input-icon__glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M20 21a8 8 0 0 0-16 0" stroke-linecap="round"/>
+              <circle cx="12" cy="8" r="4"/>
+            </svg>
+            <input id="username" name="username" type="text" required autofocus autocomplete="username" placeholder="admin" value="<?= e((string) ($_POST['username'] ?? '')) ?>">
+          </div>
         </div>
-        <div class="form-row">
-          <label for="password">Password</label>
-          <input id="password" name="password" type="password" required autocomplete="current-password">
+
+        <div class="tu-form-row">
+          <label for="password">Password <span class="tu-required" aria-hidden="true">*</span></label>
+          <div class="tu-input-icon">
+            <svg class="tu-input-icon__glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <rect x="4" y="11" width="16" height="10" rx="2"/>
+              <path d="M8 11V8a4 4 0 0 1 8 0v3" stroke-linecap="round"/>
+            </svg>
+            <input id="password" name="password" type="password" required autocomplete="current-password" placeholder="••••••••">
+          </div>
         </div>
-        <button class="btn btn-primary" type="submit">Sign in</button>
-        <a class="btn" href="/" style="margin-left:8px;">View feed</a>
+
+        <div class="admin-auth__meta">
+          <label class="tu-check">
+            <input type="checkbox" name="remember" value="1"<?= !empty($_POST['remember']) ? ' checked' : '' ?>>
+            <span>Remember me</span>
+          </label>
+          <a class="admin-auth__link" href="/admin/forgot-password.php">Forgot password?</a>
+        </div>
+
+        <button class="tu-btn tu-btn--brand tu-btn--block" type="submit">Sign in</button>
       </form>
+
+      <p class="admin-auth__helper">Looking for the public site? <a href="/">View feed</a></p>
     </div>
-  </div>
-</body>
-</html>
+<?php
+require dirname(__DIR__) . '/includes/partials/admin_auth_end.php';

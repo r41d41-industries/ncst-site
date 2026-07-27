@@ -6,8 +6,9 @@ require_once __DIR__ . '/includes/bootstrap.php';
 require_once __DIR__ . '/includes/feed_helpers.php';
 
 $pageSize = 4;
+$filterCategories = cs_filter_category_slugs();
 $category = isset($_GET['category']) ? strtoupper(trim((string) $_GET['category'])) : 'ALL';
-if (!in_array($category, CS_FILTER_CATEGORIES, true)) {
+if (!in_array($category, $filterCategories, true)) {
     $category = 'ALL';
 }
 
@@ -16,6 +17,7 @@ $posts = posts_list_published($filter, $pageSize, 0);
 $total = posts_count_published($filter);
 $hasMore = count($posts) < $total;
 $nextOffset = count($posts);
+$og = settings_resolve_og(null, site_url());
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -23,6 +25,7 @@ $nextOffset = count($posts);
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>NCST Main Feed</title>
+  <?php require __DIR__ . '/includes/partials/og_meta.php'; ?>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
@@ -37,10 +40,11 @@ $nextOffset = count($posts);
   ?>
 
   <div class="filters" data-feed-filters role="tablist" aria-label="Filter feed">
-    <?php foreach (CS_FILTER_CATEGORIES as $filterLabel): ?>
+    <?php foreach ($filterCategories as $filterLabel): ?>
       <?php
         $isActive = $category === $filterLabel;
         $href = $filterLabel === 'ALL' ? '/' : '/?category=' . rawurlencode($filterLabel);
+        $catColor = $filterLabel === 'ALL' ? '#f7931e' : category_color($filterLabel);
       ?>
       <a
         class="filter-btn<?= $isActive ? ' is-active' : '' ?>"
@@ -48,6 +52,7 @@ $nextOffset = count($posts);
         role="tab"
         aria-selected="<?= $isActive ? 'true' : 'false' ?>"
         data-category="<?= e($filterLabel) ?>"
+        style="--cat-color: <?= e($catColor) ?>"
       ><?= e($filterLabel) ?></a>
     <?php endforeach; ?>
   </div>

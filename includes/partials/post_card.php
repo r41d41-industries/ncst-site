@@ -18,7 +18,8 @@ $hasFacebook = $facebookUrl !== '';
 $hasX = $xUrl !== '';
 $hasShare = $isIncident && ($hasFacebook || $hasX);
 [$badgeLabel, $agencyOrg] = cs_parse_agency($post['agency'] ?? null, $category);
-$badgeClass = cs_badge_class($badgeLabel);
+$badgeClass = 'badge--category';
+$catColor = category_color($category);
 
 /** @var list<array<string, mixed>> $updates */
 $updates = $post['updates'] ?? [];
@@ -73,7 +74,7 @@ $articleClass = 'post post--' . $layout;
   <div class="post__body">
     <div class="post__meta">
       <div class="post__meta-left">
-        <span class="badge <?= e($badgeClass) ?>"><?= e($badgeLabel) ?></span>
+        <span class="badge <?= e($badgeClass) ?>" style="--cat-color: <?= e($catColor) ?>"><?= e($badgeLabel) ?></span>
       </div>
       <time class="post__time" datetime="<?= e((string) $post['created_at']) ?>"><?= e(cs_format_post_time((string) $post['created_at'])) ?></time>
     </div>

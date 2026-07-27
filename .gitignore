@@ -1,6 +1,15 @@
 .env
-assets/uploads/*
+assets/uploads/**
 !assets/uploads/.gitkeep
+!assets/uploads/og/
+!assets/uploads/og/.gitkeep
+!assets/uploads/media/
+!assets/uploads/media/images/
+!assets/uploads/media/images/.gitkeep
+!assets/uploads/media/audio/
+!assets/uploads/media/audio/.gitkeep
+!assets/uploads/media/documents/
+!assets/uploads/media/documents/.gitkeep
 .DS_Store
 Thumbs.db
 *.log

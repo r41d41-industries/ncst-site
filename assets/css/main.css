@@ -154,13 +154,13 @@ img {
 }
 
 .filter-btn:hover {
-  border-color: rgba(247, 147, 30, 0.45);
+  border-color: color-mix(in srgb, var(--cat-color, var(--accent)) 45%, transparent);
   color: var(--muted);
 }
 
 .filter-btn.is-active {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--cat-color, var(--accent));
+  border-color: var(--cat-color, var(--accent));
   color: #fff;
 }
 
@@ -338,6 +338,10 @@ img {
 
 .badge--default {
   color: var(--muted);
+}
+
+.badge--category {
+  color: var(--cat-color, var(--muted));
 }
 
 .post__time {
