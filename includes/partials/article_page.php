@@ -34,9 +34,19 @@ if ($found && $category !== '') {
 }
 
 $articleBody = '';
+$articleIsHtml = false;
+$footnotesHtml = '';
 if ($found) {
     $long = trim((string) ($post['article_body'] ?? ''));
-    $articleBody = $long !== '' ? $long : (string) ($post['body'] ?? '');
+    if ($long !== '') {
+        $articleIsHtml = true;
+        $footnotes = posts_normalize_footnotes($post['footnotes'] ?? null);
+        $rendered = article_render_body($long, $footnotes);
+        $articleBody = $rendered['html'];
+        $footnotesHtml = $rendered['footnotes_html'];
+    } else {
+        $articleBody = (string) ($post['body'] ?? '');
+    }
 }
 
 [$badgeLabel] = $found
@@ -46,6 +56,49 @@ $badgeClass = $found ? 'badge--category' : 'badge--default';
 $catColor = $found ? category_color($category) : '#554335';
 
 $hasImage = $found && !empty($post['image_path']);
+
+$articleGallery = null;
+$articlePlaylist = null;
+if ($found) {
+    $galleryId = isset($post['gallery_id']) ? (int) $post['gallery_id'] : 0;
+    $playlistId = isset($post['playlist_id']) ? (int) $post['playlist_id'] : 0;
+    if ($galleryId > 0) {
+        $articleGallery = gallery_find($galleryId);
+        if ($articleGallery !== null) {
+            $imageItems = [];
+            foreach ($articleGallery['items'] as $item) {
+                $path = trim((string) ($item['path'] ?? ''));
+                if ($path === '') {
+                    continue;
+                }
+                $imageItems[] = $item;
+            }
+            if ($imageItems === []) {
+                $articleGallery = null;
+            } else {
+                $articleGallery['items'] = $imageItems;
+            }
+        }
+    }
+    if ($playlistId > 0) {
+        $articlePlaylist = playlist_find($playlistId);
+        if ($articlePlaylist !== null) {
+            $audioItems = [];
+            foreach ($articlePlaylist['items'] as $item) {
+                $path = trim((string) ($item['path'] ?? ''));
+                if ($path === '') {
+                    continue;
+                }
+                $audioItems[] = $item;
+            }
+            if ($audioItems === []) {
+                $articlePlaylist = null;
+            } else {
+                $articlePlaylist['items'] = $audioItems;
+            }
+        }
+    }
+}
 
 $recorded = '';
 $expires = '';
@@ -100,7 +153,83 @@ $og = $found
           <div class="article__dateline">
             <time class="article__time" datetime="<?= e((string) $post['created_at']) ?>"><?= e(cs_format_article_time((string) $post['created_at'])) ?></time>
           </div>
-          <div class="article__text"><?= e($articleBody) ?></div>
+          <div class="article__text<?= $articleIsHtml ? ' article__text--html' : '' ?>">
+            <?php if ($articleIsHtml): ?>
+              <?= $articleBody ?>
+            <?php else: ?>
+              <?= e($articleBody) ?>
+            <?php endif; ?>
+          </div>
+
+          <?php if ($articleGallery !== null): ?>
+            <section class="article-gallery" aria-label="<?= e((string) ($articleGallery['title'] ?? 'Gallery')) ?>">
+              <h2 class="article-gallery__title"><?= e((string) ($articleGallery['title'] ?? 'Gallery')) ?></h2>
+              <?php if (!empty($articleGallery['description'])): ?>
+                <p class="article-gallery__description"><?= e((string) $articleGallery['description']) ?></p>
+              <?php endif; ?>
+              <ul class="article-gallery__grid">
+                <?php foreach ($articleGallery['items'] as $index => $item): ?>
+                  <?php
+                    $itemPath = trim((string) ($item['path'] ?? ''));
+                    $itemSrc = '/' . ltrim($itemPath, '/');
+                    $itemAlt = trim((string) ($item['alt_text'] ?? ''));
+                    $itemCaption = trim((string) ($item['caption'] ?? ''));
+                    if ($itemAlt === '') {
+                        $itemAlt = $itemCaption !== '' ? $itemCaption : (string) ($item['media_title'] ?? '');
+                    }
+                    $openLabel = $itemAlt !== '' ? 'View image: ' . $itemAlt : 'View gallery image';
+                  ?>
+                  <li class="article-gallery__item">
+                    <figure>
+                      <button
+                        type="button"
+                        class="article-gallery__trigger"
+                        data-gallery-index="<?= (int) $index ?>"
+                        data-gallery-src="<?= e($itemSrc) ?>"
+                        data-gallery-alt="<?= e($itemAlt) ?>"
+                        data-gallery-caption="<?= e($itemCaption) ?>"
+                        aria-label="<?= e($openLabel) ?>"
+                      >
+                        <img src="<?= e($itemSrc) ?>" alt="" loading="lazy">
+                      </button>
+                      <?php if ($itemCaption !== ''): ?>
+                        <figcaption><?= e($itemCaption) ?></figcaption>
+                      <?php endif; ?>
+                    </figure>
+                  </li>
+                <?php endforeach; ?>
+              </ul>
+            </section>
+          <?php endif; ?>
+
+          <?php if ($articlePlaylist !== null): ?>
+            <section class="article-playlist" aria-label="<?= e((string) ($articlePlaylist['title'] ?? 'Playlist')) ?>">
+              <h2 class="article-playlist__title"><?= e((string) ($articlePlaylist['title'] ?? 'Playlist')) ?></h2>
+              <?php if (!empty($articlePlaylist['description'])): ?>
+                <p class="article-playlist__description"><?= e((string) $articlePlaylist['description']) ?></p>
+              <?php endif; ?>
+              <ol class="article-playlist__list">
+                <?php foreach ($articlePlaylist['items'] as $item): ?>
+                  <?php
+                    $audioPath = trim((string) ($item['path'] ?? ''));
+                    $trackTitle = trim((string) ($item['title'] ?? ''));
+                    if ($trackTitle === '') {
+                        $trackTitle = trim((string) ($item['media_title'] ?? ''));
+                    }
+                    if ($trackTitle === '') {
+                        $trackTitle = (string) ($item['original_name'] ?? 'Audio');
+                    }
+                  ?>
+                  <li class="article-playlist__item">
+                    <p class="article-playlist__track"><?= e($trackTitle) ?></p>
+                    <audio class="article-playlist__audio" controls preload="none" src="/<?= e(ltrim($audioPath, '/')) ?>"></audio>
+                  </li>
+                <?php endforeach; ?>
+              </ol>
+            </section>
+          <?php endif; ?>
+
+          <?= $footnotesHtml ?>
 
           <?php if (!empty($articleShowValidMeta)): ?>
             <div class="post__agency post__agency--solo article__valid">
@@ -121,5 +250,8 @@ $og = $found
   </main>
 
   <?php require __DIR__ . '/site_footer.php'; ?>
+  <?php if ($articleGallery !== null): ?>
+    <script src="/assets/js/article-gallery.js?v=<?= e((string) filemtime(dirname(__DIR__, 2) . '/assets/js/article-gallery.js')) ?>" defer></script>
+  <?php endif; ?>
 </body>
 </html>

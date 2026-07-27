@@ -20,6 +20,14 @@ $adminStatusFilter = isset($adminStatusFilter) ? strtolower((string) $adminStatu
 if ($adminStatusFilter !== null && !in_array($adminStatusFilter, ['draft', 'published', 'trash'], true)) {
     $adminStatusFilter = null;
 }
+/** @var string|null $adminTypeFilter incident|article */
+$adminTypeFilter = isset($adminTypeFilter) ? strtolower((string) $adminTypeFilter) : null;
+if ($adminTypeFilter === 'all' || $adminTypeFilter === '') {
+    $adminTypeFilter = null;
+}
+if ($adminTypeFilter !== null && !in_array($adminTypeFilter, ['incident', 'article'], true)) {
+    $adminTypeFilter = null;
+}
 
 $username = (string) (auth_username() ?? 'Admin');
 $displayName = (string) (auth_display_name() ?: $username);
@@ -27,15 +35,32 @@ $initial = strtoupper(substr($displayName !== '' ? $displayName : $username, 0, 
 $postCount = isset($posts) && is_array($posts) ? count($posts) : null;
 $navCategoriesWithPosts = categories_with_posts();
 $statusCounts = ['all' => 0, 'draft' => 0, 'published' => 0, 'trash' => 0];
+$typeCounts = ['incident' => 0, 'article' => 0];
 if ($adminSection === 'posts') {
     try {
         $statusCounts = posts_status_counts();
     } catch (Throwable $e) {
         $statusCounts['all'] = $postCount ?? 0;
     }
+    try {
+        $typeCounts = posts_type_counts();
+    } catch (Throwable $e) {
+        // Keep zeros if counts unavailable.
+    }
 }
 $allPostsCount = $statusCounts['all'];
-$isAllPostsActive = $adminSection === 'posts' && $adminCategoryFilter === null && $adminStatusFilter === null;
+$isAllPostsActive = $adminSection === 'posts'
+    && $adminCategoryFilter === null
+    && $adminStatusFilter === null
+    && $adminTypeFilter === null;
+$isIncidentsActive = $adminSection === 'posts'
+    && $adminStatusFilter === null
+    && $adminCategoryFilter === null
+    && $adminTypeFilter === 'incident';
+$isArticlesActive = $adminSection === 'posts'
+    && $adminStatusFilter === null
+    && $adminCategoryFilter === null
+    && $adminTypeFilter === 'article';
 $adminMediaPage = isset($adminMediaPage) ? (string) $adminMediaPage : '';
 $panelSearchPlaceholders = [
     'posts' => 'Search posts…',
@@ -157,18 +182,34 @@ $panelSearchLabel = $adminSection === 'posts' ? 'Filter posts' : 'Filter ' . $ad
       <div id="admin-panel" class="admin-panel">
         <div class="admin-panel__header">
           <h2 id="admin-panel-title" class="admin-panel__title"><?= e($adminPanelTitle) ?></h2>
-          <a
+          <div
             id="admin-panel-add"
-            class="admin-panel__add<?= $adminShowAdd ? '' : ' is-hidden' ?>"
-            href="/admin/post_edit.php"
-            aria-label="New post"
-            title="New post"
+            class="admin-panel__add-wrap<?= $adminShowAdd ? '' : ' is-hidden' ?>"
             <?= $adminShowAdd ? '' : 'hidden aria-hidden="true"' ?>
           >
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-              <path d="M12 5v14M5 12h14" stroke-linecap="round"/>
-            </svg>
-          </a>
+            <button
+              type="button"
+              id="admin-panel-add-trigger"
+              class="admin-panel__add"
+              aria-expanded="false"
+              aria-haspopup="menu"
+              aria-controls="admin-panel-add-menu"
+              aria-label="Create new post"
+              title="Create new post"
+            >
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path d="M12 5v14M5 12h14" stroke-linecap="round"/>
+              </svg>
+            </button>
+            <ul id="admin-panel-add-menu" class="admin-panel__add-menu" role="menu" hidden>
+              <li role="none">
+                <a role="menuitem" href="/admin/post_incident.php">New incident</a>
+              </li>
+              <li role="none">
+                <a role="menuitem" href="/admin/post_article.php">New article</a>
+              </li>
+            </ul>
+          </div>
         </div>
 
         <div class="admin-panel__search">
@@ -202,11 +243,31 @@ $panelSearchLabel = $adminSection === 'posts' ? 'Filter posts' : 'Filter ' . $ad
                   </a>
                 </li>
                 <li>
+                  <a
+                    class="admin-panel__link<?= $isIncidentsActive ? ' is-active' : '' ?>"
+                    href="/admin/?type=incident"
+                    <?= $isIncidentsActive ? 'aria-current="page"' : '' ?>
+                  >
+                    All Incidents
+                    <span class="admin-panel__badge"><?= e((string) $typeCounts['incident']) ?></span>
+                  </a>
+                </li>
+                <li>
+                  <a
+                    class="admin-panel__link<?= $isArticlesActive ? ' is-active' : '' ?>"
+                    href="/admin/?type=article"
+                    <?= $isArticlesActive ? 'aria-current="page"' : '' ?>
+                  >
+                    All Articles
+                    <span class="admin-panel__badge"><?= e((string) $typeCounts['article']) ?></span>
+                  </a>
+                </li>
+                <li>
                   <button
                     type="button"
                     class="admin-panel__toggle"
                     data-nav-toggle
-                    aria-expanded="true"
+                    aria-expanded="false"
                     aria-controls="admin-posts-sub"
                   >
                     Library
@@ -214,7 +275,7 @@ $panelSearchLabel = $adminSection === 'posts' ? 'Filter posts' : 'Filter ' . $ad
                       <path d="M6 9l6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>
                   </button>
-                  <ul id="admin-posts-sub" class="admin-panel__sub is-open">
+                  <ul id="admin-posts-sub" class="admin-panel__sub" hidden>
                     <?php
                       $statusLinks = [
                           'draft' => ['label' => 'Drafts', 'count' => $statusCounts['draft']],
@@ -261,6 +322,7 @@ $panelSearchLabel = $adminSection === 'posts' ? 'Filter posts' : 'Filter ' . $ad
                               $navCount = (int) $navCat['count'];
                               $isCatActive = $adminSection === 'posts'
                                   && $adminStatusFilter === null
+                                  && $adminTypeFilter === null
                                   && $adminCategoryFilter === $navSlug;
                             ?>
                             <li>
@@ -347,6 +409,12 @@ $panelSearchLabel = $adminSection === 'posts' ? 'Filter posts' : 'Filter ' . $ad
             </div>
 
             <div data-panel-section="settings" class="<?= $adminSection === 'settings' ? 'is-active' : '' ?>">
+              <?php
+                $adminSettingsPage = isset($adminSettingsPage) ? (string) $adminSettingsPage : '';
+                $isSettingsPostsActive = $adminSettingsPage === 'posts';
+                $isSettingsShortcodesActive = $adminSettingsPage === 'shortcodes';
+                $settingsPostsSubOpen = $isSettingsPostsActive || $isSettingsShortcodesActive;
+              ?>
               <ul class="admin-panel__nav" aria-label="Settings">
                 <li>
                   <span class="admin-panel__link is-disabled" aria-disabled="true" title="Coming soon">
@@ -354,17 +422,44 @@ $panelSearchLabel = $adminSection === 'posts' ? 'Filter posts' : 'Filter ' . $ad
                   </span>
                 </li>
                 <li>
-                  <a
-                    class="admin-panel__link<?= ($adminSettingsPage ?? '') === 'posts' ? ' is-active' : '' ?>"
-                    href="/admin/settings/posts.php"
-                    <?= ($adminSettingsPage ?? '') === 'posts' ? 'aria-current="page"' : '' ?>
-                  >Posts</a>
+                  <button
+                    type="button"
+                    class="admin-panel__toggle"
+                    data-nav-toggle
+                    aria-expanded="<?= $settingsPostsSubOpen ? 'true' : 'false' ?>"
+                    aria-controls="admin-settings-posts-sub"
+                  >
+                    Posts
+                    <svg class="admin-panel__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                      <path d="M6 9l6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                  </button>
+                  <ul
+                    id="admin-settings-posts-sub"
+                    class="admin-panel__sub<?= $settingsPostsSubOpen ? ' is-open' : '' ?>"
+                    <?= $settingsPostsSubOpen ? '' : 'hidden' ?>
+                  >
+                    <li>
+                      <a
+                        class="admin-panel__link<?= $isSettingsPostsActive ? ' is-active' : '' ?>"
+                        href="/admin/settings/posts.php"
+                        <?= $isSettingsPostsActive ? 'aria-current="page"' : '' ?>
+                      >Categories</a>
+                    </li>
+                    <li>
+                      <a
+                        class="admin-panel__link<?= $isSettingsShortcodesActive ? ' is-active' : '' ?>"
+                        href="/admin/settings/shortcodes.php"
+                        <?= $isSettingsShortcodesActive ? 'aria-current="page"' : '' ?>
+                      >Shortcodes</a>
+                    </li>
+                  </ul>
                 </li>
                 <li>
                   <a
-                    class="admin-panel__link<?= ($adminSettingsPage ?? '') === 'open-graph' ? ' is-active' : '' ?>"
+                    class="admin-panel__link<?= $adminSettingsPage === 'open-graph' ? ' is-active' : '' ?>"
                     href="/admin/settings/open-graph.php"
-                    <?= ($adminSettingsPage ?? '') === 'open-graph' ? 'aria-current="page"' : '' ?>
+                    <?= $adminSettingsPage === 'open-graph' ? 'aria-current="page"' : '' ?>
                   >Open Graph</a>
                 </li>
                 <li>

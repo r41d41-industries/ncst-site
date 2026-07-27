@@ -24,10 +24,11 @@ declare(strict_types=1);
         <input id="media-picker-search" class="tu-input" type="search" placeholder="Search images…" aria-label="Search media">
         <button type="button" class="tu-btn tu-btn--secondary tu-btn--modal" id="media-picker-upload-new">Upload new</button>
       </div>
-      <div id="media-picker-grid" class="media-picker__grid" role="listbox" aria-label="Media items"></div>
+      <div id="media-picker-grid" class="media-picker__grid" role="listbox" aria-multiselectable="false" aria-label="Media items"></div>
       <p id="media-picker-empty" class="tu-empty" hidden>No matching media.</p>
     </div>
     <div class="admin-modal__footer">
+      <span id="media-picker-count" class="media-picker__count" hidden></span>
       <button type="button" class="tu-btn tu-btn--brand tu-btn--modal" id="media-picker-select" disabled>Select</button>
       <button type="button" class="tu-btn tu-btn--secondary tu-btn--modal" data-media-picker-close>Cancel</button>
     </div>

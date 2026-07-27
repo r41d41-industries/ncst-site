@@ -6,17 +6,31 @@ require_once dirname(__DIR__) . '/includes/bootstrap.php';
 auth_require();
 
 $allowedStatuses = ['draft', 'published', 'trash'];
+$allowedTypes = ['incident', 'article'];
 $adminStatusFilter = isset($_GET['status']) ? strtolower(trim((string) $_GET['status'])) : null;
 if ($adminStatusFilter !== null && !in_array($adminStatusFilter, $allowedStatuses, true)) {
     $adminStatusFilter = null;
+}
+
+$adminTypeFilter = isset($_GET['type']) ? strtolower(trim((string) $_GET['type'])) : null;
+if ($adminTypeFilter === 'all' || $adminTypeFilter === '') {
+    $adminTypeFilter = null;
+}
+if ($adminTypeFilter !== null && !in_array($adminTypeFilter, $allowedTypes, true)) {
+    $adminTypeFilter = null;
 }
 
 $adminCategoryFilter = isset($_GET['category']) ? strtoupper(trim((string) $_GET['category'])) : null;
 if ($adminCategoryFilter === '' || $adminCategoryFilter === 'ALL') {
     $adminCategoryFilter = null;
 }
-// Status views own the list; don't combine with category in the URL filters for nav simplicity.
+// Status views own the list; don't combine with type/category in the URL filters for nav simplicity.
 if ($adminStatusFilter !== null) {
+    $adminCategoryFilter = null;
+    $adminTypeFilter = null;
+}
+// Type and category are mutually exclusive top-level filters.
+if ($adminTypeFilter !== null) {
     $adminCategoryFilter = null;
 }
 
@@ -34,7 +48,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $adminStatusFilter === 'trash') {
     }
 }
 
-$posts = posts_list_all($adminCategoryFilter, $adminStatusFilter);
+$posts = posts_list_all($adminCategoryFilter, $adminStatusFilter, $adminTypeFilter);
 $flash = flash_get('success');
 $error = flash_get('error');
 
@@ -43,10 +57,16 @@ $statusTitles = [
     'published' => 'Published',
     'trash' => 'Trash',
 ];
+$typeTitles = [
+    'incident' => 'Incidents',
+    'article' => 'Articles',
+];
 
 $adminPageTitle = $adminStatusFilter !== null
     ? ('Posts — ' . $statusTitles[$adminStatusFilter])
-    : ($adminCategoryFilter !== null ? ('Posts — ' . $adminCategoryFilter) : 'Posts');
+    : ($adminTypeFilter !== null
+        ? ('Posts — ' . $typeTitles[$adminTypeFilter])
+        : ($adminCategoryFilter !== null ? ('Posts — ' . $adminCategoryFilter) : 'Posts'));
 $adminSection = 'posts';
 $adminPanelTitle = 'Posts';
 $adminShowAdd = true;
@@ -64,6 +84,12 @@ if ($adminStatusFilter === 'draft') {
 } elseif ($adminStatusFilter === 'trash') {
     $heading = 'Trash';
     $lead = 'Trashed posts can be restored or permanently deleted.';
+} elseif ($adminTypeFilter === 'incident') {
+    $heading = 'All Incidents';
+    $lead = 'Incident posts only. Use the sidebar to switch to articles or view all posts.';
+} elseif ($adminTypeFilter === 'article') {
+    $heading = 'All Articles';
+    $lead = 'News and weather article posts only. Use the sidebar to switch to incidents or view all posts.';
 } elseif ($adminCategoryFilter !== null) {
     $heading = $adminCategoryFilter . ' posts';
     $lead = 'Showing posts in this category. Use the sidebar to switch categories or view all posts.';
@@ -76,6 +102,10 @@ if ($adminStatusFilter === 'draft') {
     $emptyMessage = 'No published posts.';
 } elseif ($adminStatusFilter === 'trash') {
     $emptyMessage = 'Trash is empty.';
+} elseif ($adminTypeFilter === 'incident') {
+    $emptyMessage = 'No incident posts.';
+} elseif ($adminTypeFilter === 'article') {
+    $emptyMessage = 'No article posts.';
 } elseif ($adminCategoryFilter !== null) {
     $emptyMessage = 'No posts in this category.';
 }
@@ -93,7 +123,8 @@ if ($adminStatusFilter === 'draft') {
                 <button class="tu-btn tu-btn--danger" type="submit"<?= $posts === [] ? ' disabled' : '' ?>>Empty Trash</button>
               </form>
             <?php else: ?>
-              <a class="tu-btn tu-btn--brand" href="/admin/post_edit.php">New post</a>
+              <a class="tu-btn tu-btn--secondary" href="/admin/post_incident.php">New incident</a>
+              <a class="tu-btn tu-btn--brand" href="/admin/post_article.php">New article</a>
             <?php endif; ?>
           </div>
         </div>
@@ -106,7 +137,13 @@ if ($adminStatusFilter === 'draft') {
         <?php endif; ?>
 
         <div class="tu-table-wrap">
-          <table class="tu-table">
+          <table
+            class="tu-table admin-data-table"
+            data-admin-table
+            data-admin-table-search="external"
+            data-admin-table-search-input="#admin-panel-search"
+            data-admin-table-empty-message="No posts match your search."
+          >
             <thead>
               <tr>
                 <th scope="col">ID</th>
@@ -114,12 +151,12 @@ if ($adminStatusFilter === 'draft') {
                 <th scope="col">Category</th>
                 <th scope="col">Status</th>
                 <th scope="col">Updated</th>
-                <th scope="col"><span class="admin-sr-only">Actions</span></th>
+                <th scope="col" data-sortable="false"><span class="admin-sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody>
               <?php if ($posts === []): ?>
-                <tr>
+                <tr data-admin-empty-row>
                   <td colspan="6" class="tu-empty"><?= e($emptyMessage) ?></td>
                 </tr>
               <?php else: ?>
@@ -136,10 +173,10 @@ if ($adminStatusFilter === 'draft') {
                   ]);
                   ?>
                   <tr data-post-row data-search="<?= e(strtolower($searchBlob)) ?>">
-                    <td><?= e((string) $post['id']) ?></td>
+                    <td data-sort-value="<?= e((string) $post['id']) ?>"><?= e((string) $post['id']) ?></td>
                     <th scope="row"><?= e((string) $post['title']) ?></th>
                     <td><?= e((string) $post['category']) ?></td>
-                    <td>
+                    <td data-sort-value="<?= e($statusLabel) ?>">
                       <?php if ($trashed): ?>
                         <span class="tu-badge tu-badge--gray">Trash</span>
                       <?php elseif (!empty($post['published'])): ?>
@@ -148,14 +185,14 @@ if ($adminStatusFilter === 'draft') {
                         <span class="tu-badge tu-badge--gray">Draft</span>
                       <?php endif; ?>
                     </td>
-                    <td><?= e((string) $post['updated_at']) ?></td>
+                    <td data-sort-value="<?= e((string) $post['updated_at']) ?>"><?= e((string) $post['updated_at']) ?></td>
                     <td style="white-space:nowrap;">
                       <?php if ($trashed): ?>
                         <a href="/admin/post_delete.php?id=<?= e((string) $post['id']) ?>&amp;action=restore">Restore</a>
                         <span aria-hidden="true"> · </span>
                         <a href="/admin/post_delete.php?id=<?= e((string) $post['id']) ?>&amp;action=delete" style="color:var(--tu-fg-danger-strong);">Delete permanently</a>
                       <?php else: ?>
-                        <a href="/admin/post_edit.php?id=<?= e((string) $post['id']) ?>">Edit</a>
+                        <a href="<?= e(posts_edit_url($post)) ?>">Edit</a>
                         <span aria-hidden="true"> · </span>
                         <a href="/admin/post_delete.php?id=<?= e((string) $post['id']) ?>" style="color:var(--tu-fg-danger-strong);">Trash</a>
                       <?php endif; ?>
@@ -166,6 +203,5 @@ if ($adminStatusFilter === 'draft') {
             </tbody>
           </table>
         </div>
-        <p id="admin-posts-empty-filter" class="tu-empty" hidden>No posts match your search.</p>
 <?php
 require dirname(__DIR__) . '/includes/partials/admin_shell_end.php';

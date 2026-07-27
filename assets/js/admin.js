@@ -15,6 +15,8 @@
   var panelSections = document.querySelectorAll("[data-panel-section]");
   var panelTitle = document.getElementById("admin-panel-title");
   var panelAdd = document.getElementById("admin-panel-add");
+  var panelAddTrigger = document.getElementById("admin-panel-add-trigger");
+  var panelAddMenu = document.getElementById("admin-panel-add-menu");
   var accountOverlay = document.getElementById("admin-account-overlay");
   var accountModal = document.getElementById("admin-account-modal");
   var accountForm = document.getElementById("admin-account-form");
@@ -188,6 +190,7 @@
       panelAdd.hidden = !showAdd;
       panelAdd.classList.toggle("is-hidden", !showAdd);
       panelAdd.setAttribute("aria-hidden", showAdd ? "false" : "true");
+      closeAddMenu();
     }
 
     if (searchInput) {
@@ -256,12 +259,51 @@
     userTrigger.setAttribute("aria-expanded", "true");
   }
 
+  function closeAddMenu() {
+    if (!panelAddMenu || !panelAddTrigger) return;
+    panelAddMenu.classList.remove("is-open");
+    panelAddMenu.hidden = true;
+    panelAddTrigger.setAttribute("aria-expanded", "false");
+  }
+
+  function openAddMenu() {
+    if (!panelAddMenu || !panelAddTrigger) return;
+    closeUserMenu();
+    panelAddMenu.classList.add("is-open");
+    panelAddMenu.hidden = false;
+    panelAddTrigger.setAttribute("aria-expanded", "true");
+  }
+
+  if (panelAddTrigger && panelAddMenu) {
+    panelAddTrigger.addEventListener("click", function (event) {
+      event.stopPropagation();
+      var open = panelAddTrigger.getAttribute("aria-expanded") === "true";
+      if (open) {
+        closeAddMenu();
+      } else {
+        openAddMenu();
+      }
+    });
+
+    document.addEventListener("click", function (event) {
+      if (!panelAddMenu.classList.contains("is-open")) return;
+      var target = event.target;
+      if (panelAdd && panelAdd.contains(target)) return;
+      closeAddMenu();
+    });
+
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape") closeAddMenu();
+    });
+  }
+
   if (userTrigger && userMenu) {
     userTrigger.addEventListener("click", function () {
       var open = userTrigger.getAttribute("aria-expanded") === "true";
       if (open) {
         closeUserMenu();
       } else {
+        closeAddMenu();
         openUserMenu();
       }
     });
@@ -274,30 +316,8 @@
     });
   }
 
-  function filterPosts() {
-    if (!searchInput) return;
-    var query = searchInput.value.trim().toLowerCase();
-    var rows = document.querySelectorAll("[data-post-row]");
-    var visible = 0;
-
-    rows.forEach(function (row) {
-      var haystack = (row.getAttribute("data-search") || row.textContent || "").toLowerCase();
-      var match = query === "" || haystack.indexOf(query) !== -1;
-      row.classList.toggle("is-filtered-out", !match);
-      if (match) visible += 1;
-    });
-
-    var empty = document.getElementById("admin-posts-empty-filter");
-    if (empty) {
-      empty.hidden = visible !== 0 || rows.length === 0;
-    }
-  }
-
-  if (searchInput) {
-    ["input", "keyup", "search", "change"].forEach(function (evt) {
-      searchInput.addEventListener(evt, filterPosts);
-    });
-  }
+  /* Posts list filtering is handled by admin-tables.js via
+     data-admin-table-search="external" + #admin-panel-search. */
 
   function getFocusable(container) {
     if (!container) return [];
@@ -434,4 +454,16 @@
         });
     });
   }
+
+  document.querySelectorAll("[data-admin-collapse]").forEach(function (card) {
+    var toggle = card.querySelector(".admin-collapse-card__toggle");
+    var body = card.querySelector(".admin-collapse-card__body");
+    if (!toggle || !body) return;
+
+    toggle.addEventListener("click", function () {
+      var open = toggle.getAttribute("aria-expanded") !== "true";
+      toggle.setAttribute("aria-expanded", open ? "true" : "false");
+      body.hidden = !open;
+    });
+  });
 })();

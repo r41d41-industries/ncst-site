@@ -7,13 +7,18 @@
   var pickerEmpty = document.getElementById("media-picker-empty");
   var pickerSearch = document.getElementById("media-picker-search");
   var pickerSelect = document.getElementById("media-picker-select");
+  var pickerCount = document.getElementById("media-picker-count");
+  var pickerTitle = document.getElementById("media-picker-title");
   var pickerUploadNew = document.getElementById("media-picker-upload-new");
   var selectedId = null;
   var selectedItem = null;
+  var selectedMap = {};
+  var multiSelect = false;
   var pickerKind = "image";
   var onPick = null;
   var lastFocus = null;
   var itemsCache = [];
+  var defaultSelectLabel = pickerSelect ? pickerSelect.textContent : "Select";
 
   function csrf() {
     var hidden = document.querySelector('input[name="_csrf"]');
@@ -22,12 +27,73 @@
     return "";
   }
 
+  function selectedCount() {
+    return Object.keys(selectedMap).length;
+  }
+
+  function isSelected(id) {
+    if (multiSelect) return !!selectedMap[String(id)];
+    return selectedId != null && Number(selectedId) === Number(id);
+  }
+
+  function updateSelectUi() {
+    var count = multiSelect ? selectedCount() : selectedId ? 1 : 0;
+    if (pickerSelect) {
+      pickerSelect.disabled = count === 0;
+      if (multiSelect) {
+        pickerSelect.textContent =
+          count > 0 ? "Add selected (" + count + ")" : "Add selected";
+      } else {
+        pickerSelect.textContent = defaultSelectLabel || "Select";
+      }
+    }
+    if (pickerCount) {
+      if (multiSelect && count > 0) {
+        pickerCount.hidden = false;
+        pickerCount.textContent = count + " selected";
+      } else {
+        pickerCount.hidden = true;
+        pickerCount.textContent = "";
+      }
+    }
+    if (pickerGrid) {
+      pickerGrid.setAttribute("aria-multiselectable", multiSelect ? "true" : "false");
+    }
+  }
+
+  function toggleMultiSelection(item) {
+    var key = String(item.id);
+    if (selectedMap[key]) {
+      delete selectedMap[key];
+    } else {
+      selectedMap[key] = item;
+    }
+  }
+
+  function getSelectedItems() {
+    if (!multiSelect) {
+      return selectedItem ? [selectedItem] : [];
+    }
+    var ordered = [];
+    itemsCache.forEach(function (item) {
+      if (selectedMap[String(item.id)]) ordered.push(selectedMap[String(item.id)]);
+    });
+    Object.keys(selectedMap).forEach(function (key) {
+      var already = ordered.some(function (item) {
+        return String(item.id) === key;
+      });
+      if (!already) ordered.push(selectedMap[key]);
+    });
+    return ordered;
+  }
+
   function renderGrid(items) {
     if (!pickerGrid) return;
     pickerGrid.innerHTML = "";
     itemsCache = items || [];
     if (!itemsCache.length) {
       if (pickerEmpty) pickerEmpty.hidden = false;
+      updateSelectUi();
       return;
     }
     if (pickerEmpty) pickerEmpty.hidden = true;
@@ -36,8 +102,9 @@
       btn.type = "button";
       btn.className = "media-picker__item";
       btn.setAttribute("role", "option");
-      btn.setAttribute("aria-selected", selectedId === item.id ? "true" : "false");
-      if (selectedId === item.id) btn.classList.add("is-selected");
+      var selected = isSelected(item.id);
+      btn.setAttribute("aria-selected", selected ? "true" : "false");
+      if (selected) btn.classList.add("is-selected");
       btn.title = item.title || item.original_name || "#" + item.id;
       if (item.kind === "image") {
         var img = document.createElement("img");
@@ -47,14 +114,25 @@
       } else {
         btn.textContent = item.title || item.original_name || item.kind;
       }
+      if (multiSelect) {
+        var mark = document.createElement("span");
+        mark.className = "media-picker__check";
+        mark.setAttribute("aria-hidden", "true");
+        btn.appendChild(mark);
+      }
       btn.addEventListener("click", function () {
-        selectedId = item.id;
-        selectedItem = item;
+        if (multiSelect) {
+          toggleMultiSelection(item);
+        } else {
+          selectedId = item.id;
+          selectedItem = item;
+        }
         renderGrid(itemsCache);
-        if (pickerSelect) pickerSelect.disabled = false;
+        updateSelectUi();
       });
       pickerGrid.appendChild(btn);
     });
+    updateSelectUi();
   }
 
   function loadItems(query) {
@@ -75,11 +153,22 @@
   function openPicker(options) {
     options = options || {};
     pickerKind = options.kind || "image";
+    multiSelect = !!options.multiple;
     onPick = typeof options.onSelect === "function" ? options.onSelect : null;
     selectedId = options.selectedId || null;
     selectedItem = null;
-    if (pickerSelect) pickerSelect.disabled = !selectedId;
-    if (pickerSearch) pickerSearch.value = "";
+    selectedMap = {};
+    if (pickerTitle) {
+      pickerTitle.textContent = multiSelect
+        ? "Add from library"
+        : "Choose from library";
+    }
+    if (pickerSearch) {
+      pickerSearch.value = "";
+      pickerSearch.placeholder =
+        pickerKind === "audio" ? "Search audio…" : "Search images…";
+    }
+    updateSelectUi();
     if (!pickerOverlay || !pickerModal) return;
     lastFocus = document.activeElement;
     pickerOverlay.hidden = false;
@@ -92,6 +181,10 @@
     if (!pickerOverlay) return;
     pickerOverlay.hidden = true;
     document.body.style.overflow = "";
+    multiSelect = false;
+    selectedMap = {};
+    updateSelectUi();
+    if (pickerTitle) pickerTitle.textContent = "Choose from library";
     if (lastFocus && typeof lastFocus.focus === "function") {
       lastFocus.focus();
     }
@@ -109,6 +202,14 @@
 
   if (pickerSelect) {
     pickerSelect.addEventListener("click", function () {
+      if (multiSelect) {
+        var items = getSelectedItems();
+        if (items.length && typeof onPick === "function") {
+          onPick(items);
+        }
+        closePicker();
+        return;
+      }
       if (!selectedItem && selectedId) {
         selectedItem = itemsCache.find(function (i) {
           return i.id === selectedId;
@@ -128,11 +229,24 @@
         kind: pickerKind,
         onComplete: function (uploaded) {
           if (uploaded && uploaded.length) {
-            loadItems(pickerSearch ? pickerSearch.value.trim() : "");
-            selectedId = uploaded[0].id;
-            selectedItem = uploaded[0];
-            if (pickerSelect) pickerSelect.disabled = false;
-            renderGrid(itemsCache.concat(uploaded));
+            uploaded.forEach(function (item) {
+              if (multiSelect) {
+                selectedMap[String(item.id)] = item;
+              }
+            });
+            if (!multiSelect) {
+              selectedId = uploaded[0].id;
+              selectedItem = uploaded[0];
+            }
+            var merged = itemsCache.slice();
+            uploaded.forEach(function (item) {
+              var exists = merged.some(function (row) {
+                return row.id === item.id;
+              });
+              if (!exists) merged.unshift(item);
+            });
+            renderGrid(merged);
+            updateSelectUi();
           }
         },
       });
@@ -250,6 +364,33 @@
   }
 
   /* Collection ordered picker helpers */
+  function appendCollectionItem(list, kind, item) {
+    if (!list || !item) return false;
+    var existing = list.querySelector(
+      '.media-collection-items__row[data-media-id="' + String(item.id) + '"]'
+    );
+    if (existing) return false;
+    var li = document.createElement("li");
+    li.className = "media-collection-items__row";
+    li.setAttribute("data-media-id", String(item.id));
+    var thumbHtml =
+      kind === "image"
+        ? '<img src="/' + String(item.path).replace(/^\//, "") + '" alt="">'
+        : '<span class="media-grid__thumb-icon">Audio</span>';
+    li.innerHTML =
+      '<span class="media-collection-items__ord"></span>' +
+      thumbHtml +
+      '<div><strong></strong><input type="hidden" name="item_media_ids[]" value="' +
+      item.id +
+      '">' +
+      '<input class="tu-input" type="text" name="item_captions[]" placeholder="Optional override" style="margin-top:6px;"></div>' +
+      '<button type="button" class="tu-btn tu-btn--secondary" data-collection-remove>Remove</button>';
+    li.querySelector("strong").textContent =
+      item.title || item.original_name || "#" + item.id;
+    list.appendChild(li);
+    return true;
+  }
+
   document.querySelectorAll("[data-collection-add]").forEach(function (btn) {
     btn.addEventListener("click", function () {
       var list = document.getElementById(btn.getAttribute("data-collection-list") || "");
@@ -257,28 +398,14 @@
       if (!list) return;
       openPicker({
         kind: kind,
-        onSelect: function (item) {
-          var li = document.createElement("li");
-          li.className = "media-collection-items__row";
-          li.setAttribute("data-media-id", String(item.id));
-          var thumbHtml =
-            kind === "image"
-              ? '<img src="/' +
-                String(item.path).replace(/^\//, "") +
-                '" alt="">'
-              : '<span class="media-grid__thumb-icon">Audio</span>';
-          li.innerHTML =
-            '<span class="media-collection-items__ord"></span>' +
-            thumbHtml +
-            '<div><strong></strong><input type="hidden" name="item_media_ids[]" value="' +
-            item.id +
-            '">' +
-            '<input class="tu-input" type="text" name="item_captions[]" placeholder="Optional override" style="margin-top:6px;"></div>' +
-            '<button type="button" class="tu-btn tu-btn--secondary" data-collection-remove>Remove</button>';
-          li.querySelector("strong").textContent =
-            item.title || item.original_name || "#" + item.id;
-          list.appendChild(li);
-          renumberCollection(list);
+        multiple: true,
+        onSelect: function (items) {
+          var picked = Array.isArray(items) ? items : items ? [items] : [];
+          var added = false;
+          picked.forEach(function (item) {
+            if (appendCollectionItem(list, kind, item)) added = true;
+          });
+          if (added) renumberCollection(list);
         },
       });
     });

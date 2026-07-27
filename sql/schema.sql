@@ -48,12 +48,23 @@ CREATE TABLE IF NOT EXISTS `CS_settings` (
   PRIMARY KEY (`setting_key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS `CS_shortcodes` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `code` VARCHAR(64) NOT NULL,
+  `replacement` TEXT NOT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_cs_shortcodes_code` (`code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS `CS_posts` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `category` VARCHAR(32) NOT NULL,
   `title` VARCHAR(255) NOT NULL,
   `body` TEXT NOT NULL,
   `article_body` TEXT DEFAULT NULL,
+  `footnotes` JSON DEFAULT NULL,
   `update_label` VARCHAR(64) DEFAULT NULL,
   `update_text` VARCHAR(255) DEFAULT NULL,
   `agency` VARCHAR(64) DEFAULT NULL,
@@ -72,6 +83,8 @@ CREATE TABLE IF NOT EXISTS `CS_posts` (
   `og_description` TEXT DEFAULT NULL,
   `og_image_path` VARCHAR(512) DEFAULT NULL,
   `og_image_media_id` INT UNSIGNED DEFAULT NULL,
+  `gallery_id` INT UNSIGNED DEFAULT NULL,
+  `playlist_id` INT UNSIGNED DEFAULT NULL,
   `published` TINYINT(1) NOT NULL DEFAULT 0,
   `trashed_at` DATETIME DEFAULT NULL,
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -81,7 +94,9 @@ CREATE TABLE IF NOT EXISTS `CS_posts` (
   KEY `idx_cs_posts_category` (`category`),
   KEY `idx_cs_posts_trashed_at` (`trashed_at`),
   KEY `idx_cs_posts_image_media` (`image_media_id`),
-  KEY `idx_cs_posts_og_image_media` (`og_image_media_id`)
+  KEY `idx_cs_posts_og_image_media` (`og_image_media_id`),
+  KEY `idx_cs_posts_gallery` (`gallery_id`),
+  KEY `idx_cs_posts_playlist` (`playlist_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `CS_media` (

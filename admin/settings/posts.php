@@ -22,7 +22,9 @@ require dirname(__DIR__, 2) . '/includes/partials/admin_shell_start.php';
             <h1>Categories</h1>
             <p class="admin-content__lead">Manage feed categories, templates, and colors used on filters and badges.</p>
           </div>
-          <a class="tu-btn tu-btn--brand" href="/admin/settings/category_edit.php">Add category</a>
+          <div class="tu-btn-row">
+            <a class="tu-btn tu-btn--brand" href="/admin/settings/category_edit.php">Add category</a>
+          </div>
         </div>
 
         <?php if ($flash): ?>
@@ -33,7 +35,12 @@ require dirname(__DIR__, 2) . '/includes/partials/admin_shell_start.php';
         <?php endif; ?>
 
         <div class="tu-table-wrap">
-          <table class="tu-table">
+          <table
+            class="tu-table admin-data-table"
+            data-admin-table
+            data-admin-table-search-label="Filter categories"
+            data-admin-table-empty-message="No categories match your search."
+          >
             <thead>
               <tr>
                 <th scope="col">Name</th>
@@ -41,12 +48,12 @@ require dirname(__DIR__, 2) . '/includes/partials/admin_shell_start.php';
                 <th scope="col">Template</th>
                 <th scope="col">Color</th>
                 <th scope="col">Filter</th>
-                <th scope="col"><span class="admin-sr-only">Actions</span></th>
+                <th scope="col" data-sortable="false"><span class="admin-sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody>
               <?php if ($categories === []): ?>
-                <tr>
+                <tr data-admin-empty-row>
                   <td colspan="6">No categories yet.</td>
                 </tr>
               <?php else: ?>
@@ -54,18 +61,25 @@ require dirname(__DIR__, 2) . '/includes/partials/admin_shell_start.php';
                   <?php
                     $color = cs_normalize_hex_color((string) ($cat['color'] ?? '')) ?? '#f7931e';
                     $id = (int) $cat['id'];
+                    $searchBlob = strtolower(implode(' ', [
+                        (string) $cat['name'],
+                        (string) $cat['slug'],
+                        (string) $cat['template'],
+                        $color,
+                        !empty($cat['is_filter']) ? 'yes' : 'no',
+                    ]));
                   ?>
-                  <tr>
+                  <tr data-search="<?= e($searchBlob) ?>">
                     <td><?= e((string) $cat['name']) ?></td>
                     <td><code><?= e((string) $cat['slug']) ?></code></td>
                     <td><?= e((string) $cat['template']) ?></td>
-                    <td>
+                    <td data-sort-value="<?= e($color) ?>">
                       <span class="admin-color-swatch" style="--swatch: <?= e($color) ?>" title="<?= e($color) ?>">
                         <span class="admin-color-swatch__chip" aria-hidden="true"></span>
                         <?= e($color) ?>
                       </span>
                     </td>
-                    <td><?= !empty($cat['is_filter']) ? 'Yes' : 'No' ?></td>
+                    <td data-sort-value="<?= !empty($cat['is_filter']) ? '1' : '0' ?>"><?= !empty($cat['is_filter']) ? 'Yes' : 'No' ?></td>
                     <td>
                       <a class="tu-btn tu-btn--secondary" href="/admin/settings/category_edit.php?id=<?= e((string) $id) ?>">Edit</a>
                     </td>

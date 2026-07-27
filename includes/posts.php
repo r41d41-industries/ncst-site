@@ -161,12 +161,30 @@ function posts_count_published(?string $category = null): int
 }
 
 /**
- * Admin list: optional category + status (draft|published|trash).
- * Default (no status) excludes trash.
+ * Whether a post matches an admin type filter (incident|article).
+ * Articles are news + weather category templates.
+ */
+function posts_matches_admin_type(array $post, string $type): bool
+{
+    $type = strtolower(trim($type));
+    $tpl = category_template((string) ($post['category'] ?? ''));
+    if ($type === 'incident') {
+        return $tpl === 'incident';
+    }
+    if ($type === 'article') {
+        return in_array($tpl, ['news', 'weather'], true);
+    }
+    return true;
+}
+
+/**
+ * Admin list: optional category, status (draft|published|trash), and type (incident|article).
+ * Default (no status) excludes trash. Type filters by category template group.
  *
+ * @param 'incident'|'article'|null $type
  * @return list<array<string, mixed>>
  */
-function posts_list_all(?string $category = null, ?string $status = null): array
+function posts_list_all(?string $category = null, ?string $status = null, ?string $type = null): array
 {
     $table = posts_table();
     $sql = "SELECT * FROM `{$table}` WHERE 1=1";
@@ -191,7 +209,17 @@ function posts_list_all(?string $category = null, ?string $status = null): array
     $sql .= ' ORDER BY created_at DESC, id DESC';
     $stmt = db()->prepare($sql);
     $stmt->execute($params);
-    return $stmt->fetchAll();
+    $posts = $stmt->fetchAll();
+
+    $type = $type !== null ? strtolower(trim($type)) : null;
+    if ($type !== null && in_array($type, ['incident', 'article'], true)) {
+        $posts = array_values(array_filter(
+            $posts,
+            static fn(array $post): bool => posts_matches_admin_type($post, $type)
+        ));
+    }
+
+    return $posts;
 }
 
 /**
@@ -217,6 +245,34 @@ function posts_status_counts(): array
         'published' => (int) ($row['published_count'] ?? 0),
         'trash' => (int) ($row['trash_count'] ?? 0),
     ];
+}
+
+/**
+ * Non-trashed post counts for All Incidents / All Articles nav badges.
+ *
+ * @return array{incident: int, article: int}
+ */
+function posts_type_counts(): array
+{
+    $table = posts_table();
+    $rows = db()->query(
+        "SELECT category, COUNT(*) AS cnt FROM `{$table}`
+         WHERE trashed_at IS NULL
+         GROUP BY category"
+    )->fetchAll();
+
+    $counts = ['incident' => 0, 'article' => 0];
+    foreach ($rows as $row) {
+        $tpl = category_template((string) ($row['category'] ?? ''));
+        $cnt = (int) ($row['cnt'] ?? 0);
+        if ($tpl === 'incident') {
+            $counts['incident'] += $cnt;
+        } elseif (in_array($tpl, ['news', 'weather'], true)) {
+            $counts['article'] += $cnt;
+        }
+    }
+
+    return $counts;
 }
 
 function posts_is_trashed(array $post): bool
@@ -301,22 +357,27 @@ function posts_create(array $data): int
 {
     $table = posts_table();
     $sql = "INSERT INTO `{$table}` (
-        category, title, body, article_body, update_label, update_text,
+        category, title, body, article_body, footnotes, update_label, update_text,
         agency, dispatched_at, cleared_at, recorded_at, expires_at, dispatched_text, status_text,
         image_path, image_media_id, facebook_url, x_url, read_more_url,
-        og_title, og_description, og_image_path, og_image_media_id, published
+        og_title, og_description, og_image_path, og_image_media_id, gallery_id, playlist_id, published
     ) VALUES (
-        :category, :title, :body, :article_body, :update_label, :update_text,
+        :category, :title, :body, :article_body, :footnotes, :update_label, :update_text,
         :agency, :dispatched_at, :cleared_at, :recorded_at, :expires_at, :dispatched_text, :status_text,
         :image_path, :image_media_id, :facebook_url, :x_url, :read_more_url,
-        :og_title, :og_description, :og_image_path, :og_image_media_id, :published
+        :og_title, :og_description, :og_image_path, :og_image_media_id, :gallery_id, :playlist_id, :published
     )";
     $stmt = db()->prepare($sql);
+    $footnotes = $data['footnotes'] ?? null;
+    if (is_array($footnotes)) {
+        $footnotes = json_encode(posts_normalize_footnotes($footnotes), JSON_UNESCAPED_UNICODE);
+    }
     $stmt->execute([
         ':category' => $data['category'],
         ':title' => $data['title'],
         ':body' => $data['body'],
         ':article_body' => $data['article_body'] ?? null,
+        ':footnotes' => $footnotes,
         ':update_label' => $data['update_label'] ?? null,
         ':update_text' => $data['update_text'] ?? null,
         ':agency' => $data['agency'] ?? null,
@@ -335,6 +396,8 @@ function posts_create(array $data): int
         ':og_description' => $data['og_description'] ?? null,
         ':og_image_path' => $data['og_image_path'] ?? null,
         ':og_image_media_id' => $data['og_image_media_id'] ?? null,
+        ':gallery_id' => $data['gallery_id'] ?? null,
+        ':playlist_id' => $data['playlist_id'] ?? null,
         ':published' => !empty($data['published']) ? 1 : 0,
     ]);
     return (int) db()->lastInsertId();
@@ -351,6 +414,7 @@ function posts_update(int $id, array $data): void
         title = :title,
         body = :body,
         article_body = :article_body,
+        footnotes = :footnotes,
         update_label = :update_label,
         update_text = :update_text,
         agency = :agency,
@@ -369,6 +433,8 @@ function posts_update(int $id, array $data): void
         og_description = :og_description,
         og_image_path = :og_image_path,
         og_image_media_id = :og_image_media_id,
+        gallery_id = :gallery_id,
+        playlist_id = :playlist_id,
         published = :published,
         updated_at = CURRENT_TIMESTAMP
     WHERE id = :id";
@@ -379,6 +445,9 @@ function posts_update(int $id, array $data): void
         ':title' => $data['title'],
         ':body' => $data['body'],
         ':article_body' => $data['article_body'] ?? null,
+        ':footnotes' => is_array($data['footnotes'] ?? null)
+            ? json_encode(posts_normalize_footnotes($data['footnotes']), JSON_UNESCAPED_UNICODE)
+            : ($data['footnotes'] ?? null),
         ':update_label' => $data['update_label'] ?? null,
         ':update_text' => $data['update_text'] ?? null,
         ':agency' => $data['agency'] ?? null,
@@ -397,6 +466,8 @@ function posts_update(int $id, array $data): void
         ':og_description' => $data['og_description'] ?? null,
         ':og_image_path' => $data['og_image_path'] ?? null,
         ':og_image_media_id' => $data['og_image_media_id'] ?? null,
+        ':gallery_id' => $data['gallery_id'] ?? null,
+        ':playlist_id' => $data['playlist_id'] ?? null,
         ':published' => !empty($data['published']) ? 1 : 0,
     ]);
 }

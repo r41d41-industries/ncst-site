@@ -36,7 +36,12 @@ require dirname(__DIR__, 2) . '/includes/partials/admin_shell_start.php';
           <p class="tu-empty">No playlists yet.</p>
         <?php else: ?>
           <div class="tu-card tu-table-wrap">
-            <table class="tu-table">
+            <table
+              class="tu-table admin-data-table"
+              data-admin-table
+              data-admin-table-search-label="Filter playlists"
+              data-admin-table-empty-message="No playlists match your search."
+            >
               <thead>
                 <tr>
                   <th scope="col">Title</th>
@@ -46,12 +51,19 @@ require dirname(__DIR__, 2) . '/includes/partials/admin_shell_start.php';
               </thead>
               <tbody>
                 <?php foreach ($playlists as $p): ?>
-                  <tr>
+                  <?php
+                    $searchBlob = strtolower(implode(' ', [
+                        (string) $p['title'],
+                        (string) ($p['item_count'] ?? 0),
+                        (string) $p['updated_at'],
+                    ]));
+                  ?>
+                  <tr data-search="<?= e($searchBlob) ?>">
                     <th scope="row">
                       <a href="/admin/media/playlist_edit.php?id=<?= e((string) $p['id']) ?>"><?= e((string) $p['title']) ?></a>
                     </th>
-                    <td><?= e((string) ($p['item_count'] ?? 0)) ?></td>
-                    <td><?= e((string) $p['updated_at']) ?></td>
+                    <td data-sort-value="<?= e((string) (int) ($p['item_count'] ?? 0)) ?>"><?= e((string) ($p['item_count'] ?? 0)) ?></td>
+                    <td data-sort-value="<?= e((string) $p['updated_at']) ?>"><?= e((string) $p['updated_at']) ?></td>
                   </tr>
                 <?php endforeach; ?>
               </tbody>

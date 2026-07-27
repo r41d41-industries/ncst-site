@@ -36,7 +36,12 @@ require dirname(__DIR__, 2) . '/includes/partials/admin_shell_start.php';
           <p class="tu-empty">No galleries yet.</p>
         <?php else: ?>
           <div class="tu-card tu-table-wrap">
-            <table class="tu-table">
+            <table
+              class="tu-table admin-data-table"
+              data-admin-table
+              data-admin-table-search-label="Filter galleries"
+              data-admin-table-empty-message="No galleries match your search."
+            >
               <thead>
                 <tr>
                   <th scope="col">Title</th>
@@ -46,12 +51,19 @@ require dirname(__DIR__, 2) . '/includes/partials/admin_shell_start.php';
               </thead>
               <tbody>
                 <?php foreach ($galleries as $g): ?>
-                  <tr>
+                  <?php
+                    $searchBlob = strtolower(implode(' ', [
+                        (string) $g['title'],
+                        (string) ($g['item_count'] ?? 0),
+                        (string) $g['updated_at'],
+                    ]));
+                  ?>
+                  <tr data-search="<?= e($searchBlob) ?>">
                     <th scope="row">
                       <a href="/admin/media/gallery_edit.php?id=<?= e((string) $g['id']) ?>"><?= e((string) $g['title']) ?></a>
                     </th>
-                    <td><?= e((string) ($g['item_count'] ?? 0)) ?></td>
-                    <td><?= e((string) $g['updated_at']) ?></td>
+                    <td data-sort-value="<?= e((string) (int) ($g['item_count'] ?? 0)) ?>"><?= e((string) ($g['item_count'] ?? 0)) ?></td>
+                    <td data-sort-value="<?= e((string) $g['updated_at']) ?>"><?= e((string) $g['updated_at']) ?></td>
                   </tr>
                 <?php endforeach; ?>
               </tbody>
