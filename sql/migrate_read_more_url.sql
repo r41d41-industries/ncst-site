@@ -1,0 +1,2 @@
+ALTER TABLE `CS_posts`
+  ADD COLUMN `read_more_url` VARCHAR(512) DEFAULT NULL AFTER `x_url`;
