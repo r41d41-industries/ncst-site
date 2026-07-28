@@ -1,0 +1,12 @@
+{
+  "designSystemId": "f32489d1-41a6-41fa-8f30-ffd92f1cc652",
+  "installScope": "project",
+  "packageId": "12d955ee-edfe-44e8-b938-da7e7fe47132",
+  "skillFolderName": "typeui-design-system",
+  "slug": "untitled-project-2",
+  "source": "workspace",
+  "templateSlug": "shadcn",
+  "type": "typeui-design-system",
+  "variant": "workspace",
+  "workspaceId": "a963ecea-09e9-46e5-857b-915d503a19e2"
+}
