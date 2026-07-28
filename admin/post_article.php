@@ -193,6 +193,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 redirect('/admin/?status=trash');
             }
             flash_set('success', $isEdit ? 'Article updated.' : 'Article created.');
+            if ($isEdit) {
+                redirect('/admin/post_article.php?id=' . $postId);
+            }
             redirect('/admin/?status=' . ($published ? 'published' : 'draft'));
         } catch (Throwable $e) {
             $error = $e->getMessage();
@@ -217,6 +220,7 @@ $adminSection = 'posts';
 $adminPanelTitle = 'Posts';
 $adminShowAdd = true;
 $adminExtraHead = '<script src="https://cdn.jsdelivr.net/npm/tinymce@7/tinymce.min.js" referrerpolicy="origin"></script>';
+$flash = flash_get('success');
 require dirname(__DIR__) . '/includes/partials/admin_shell_start.php';
 ?>
         <div class="admin-content__header">
@@ -227,6 +231,9 @@ require dirname(__DIR__) . '/includes/partials/admin_shell_start.php';
           <a class="tu-btn tu-btn--secondary" href="/admin/">Back to posts</a>
         </div>
 
+        <?php if ($flash): ?>
+          <div class="tu-alert tu-alert--success" role="status"><?= e($flash) ?></div>
+        <?php endif; ?>
         <?php if ($error): ?>
           <div class="tu-alert tu-alert--danger" role="alert"><?= e($error) ?></div>
         <?php endif; ?>

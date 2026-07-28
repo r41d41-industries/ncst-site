@@ -203,26 +203,89 @@ $og = $found
           <?php endif; ?>
 
           <?php if ($articlePlaylist !== null): ?>
-            <section class="article-playlist" aria-label="<?= e((string) ($articlePlaylist['title'] ?? 'Playlist')) ?>">
-              <h2 class="article-playlist__title"><?= e((string) ($articlePlaylist['title'] ?? 'Playlist')) ?></h2>
+            <?php
+              $playlistLabel = (string) ($articlePlaylist['title'] ?? 'Playlist');
+              $playlistNowId = 'article-playlist-now-title';
+            ?>
+            <section class="article-playlist" aria-label="<?= e($playlistLabel) ?>" data-article-playlist>
+              <h2 class="article-playlist__title"><?= e($playlistLabel) ?></h2>
               <?php if (!empty($articlePlaylist['description'])): ?>
                 <p class="article-playlist__description"><?= e((string) $articlePlaylist['description']) ?></p>
               <?php endif; ?>
-              <ol class="article-playlist__list">
-                <?php foreach ($articlePlaylist['items'] as $item): ?>
+
+              <div class="article-playlist__player" role="group" aria-label="Audio player">
+                <audio class="article-playlist__audio" preload="metadata" aria-hidden="true"></audio>
+
+                <div class="article-playlist__now">
+                  <p class="article-playlist__now-label">Now playing</p>
+                  <p class="article-playlist__now-title" id="<?= e($playlistNowId) ?>">—</p>
+                </div>
+
+                <div class="article-playlist__controls">
+                  <button
+                    type="button"
+                    class="article-playlist__play"
+                    aria-label="Play"
+                    disabled
+                  >
+                    <span class="article-playlist__play-icon" aria-hidden="true"></span>
+                  </button>
+
+                  <div class="article-playlist__timeline">
+                    <span class="article-playlist__time article-playlist__time--current" aria-live="off">0:00</span>
+                    <input
+                      type="range"
+                      class="article-playlist__seek"
+                      min="0"
+                      max="0"
+                      value="0"
+                      step="any"
+                      aria-label="Seek"
+                      disabled
+                    >
+                    <span class="article-playlist__time article-playlist__time--duration">0:00</span>
+                  </div>
+
+                  <button
+                    type="button"
+                    class="article-playlist__mute"
+                    aria-label="Mute"
+                    aria-pressed="false"
+                    disabled
+                  >
+                    <span class="article-playlist__mute-icon" aria-hidden="true"></span>
+                  </button>
+                </div>
+              </div>
+
+              <ol class="article-playlist__tracks" role="list">
+                <?php foreach ($articlePlaylist['items'] as $index => $item): ?>
                   <?php
                     $audioPath = trim((string) ($item['path'] ?? ''));
+                    $audioSrc = '/' . ltrim($audioPath, '/');
                     $trackTitle = trim((string) ($item['title'] ?? ''));
                     if ($trackTitle === '') {
                         $trackTitle = trim((string) ($item['media_title'] ?? ''));
                     }
                     if ($trackTitle === '') {
-                        $trackTitle = (string) ($item['original_name'] ?? 'Audio');
+                        $original = trim((string) ($item['original_name'] ?? ''));
+                        $cleaned = $original !== '' ? pathinfo($original, PATHINFO_FILENAME) : '';
+                        $trackTitle = $cleaned !== '' ? $cleaned : 'Audio';
                     }
+                    $trackNum = $index + 1;
                   ?>
                   <li class="article-playlist__item">
-                    <p class="article-playlist__track"><?= e($trackTitle) ?></p>
-                    <audio class="article-playlist__audio" controls preload="none" src="/<?= e(ltrim($audioPath, '/')) ?>"></audio>
+                    <button
+                      type="button"
+                      class="article-playlist__track"
+                      data-playlist-src="<?= e($audioSrc) ?>"
+                      data-playlist-title="<?= e($trackTitle) ?>"
+                      data-playlist-index="<?= (int) $index ?>"
+                      aria-current="<?= $index === 0 ? 'true' : 'false' ?>"
+                    >
+                      <span class="article-playlist__track-num" aria-hidden="true"><?= (int) $trackNum ?></span>
+                      <span class="article-playlist__track-title"><?= e($trackTitle) ?></span>
+                    </button>
                   </li>
                 <?php endforeach; ?>
               </ol>
@@ -252,6 +315,9 @@ $og = $found
   <?php require __DIR__ . '/site_footer.php'; ?>
   <?php if ($articleGallery !== null): ?>
     <script src="/assets/js/article-gallery.js?v=<?= e((string) filemtime(dirname(__DIR__, 2) . '/assets/js/article-gallery.js')) ?>" defer></script>
+  <?php endif; ?>
+  <?php if ($articlePlaylist !== null): ?>
+    <script src="/assets/js/article-playlist.js?v=<?= e((string) filemtime(dirname(__DIR__, 2) . '/assets/js/article-playlist.js')) ?>" defer></script>
   <?php endif; ?>
 </body>
 </html>
