@@ -433,9 +433,10 @@ $panelSearchLabel = $adminSection === 'posts' ? 'Filter posts' : 'Filter ' . $ad
                 $settingsPostsSubOpen = $isSettingsPostsActive || $isSettingsShortcodesActive || $isSettingsAgenciesActive;
                 $isFbCredentialsActive = $adminSettingsPage === 'facebook-credentials';
                 $isFbCronActive = $adminSettingsPage === 'facebook-cron';
+                $isFbAutoPostActive = $adminSettingsPage === 'facebook-auto-post';
                 $isFbImportActive = $adminSettingsPage === 'facebook-import';
                 $isFbHashtagsActive = $adminSettingsPage === 'facebook-hashtags';
-                $settingsFacebookSubOpen = $isFbCredentialsActive || $isFbCronActive || $isFbImportActive || $isFbHashtagsActive;
+                $settingsFacebookSubOpen = $isFbCredentialsActive || $isFbCronActive || $isFbAutoPostActive || $isFbImportActive || $isFbHashtagsActive;
               ?>
               <ul class="admin-panel__nav" aria-label="Settings">
                 <li>
@@ -522,6 +523,13 @@ $panelSearchLabel = $adminSection === 'posts' ? 'Filter posts' : 'Filter ' . $ad
                         href="/admin/settings/facebook/cron.php"
                         <?= $isFbCronActive ? 'aria-current="page"' : '' ?>
                       >Cron</a>
+                    </li>
+                    <li>
+                      <a
+                        class="admin-panel__link<?= $isFbAutoPostActive ? ' is-active' : '' ?>"
+                        href="/admin/settings/facebook/auto-post.php"
+                        <?= $isFbAutoPostActive ? 'aria-current="page"' : '' ?>
+                      >Auto-post</a>
                     </li>
                     <li>
                       <a
