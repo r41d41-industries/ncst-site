@@ -13,6 +13,7 @@ require_once __DIR__ . '/media.php';
 require_once __DIR__ . '/shortcodes.php';
 require_once __DIR__ . '/article_content.php';
 require_once __DIR__ . '/posts.php';
+require_once __DIR__ . '/facebook.php';
 
 load_env(dirname(__DIR__) . '/.env');
 

@@ -466,4 +466,156 @@
       body.hidden = !open;
     });
   });
+
+  document.addEventListener("click", function (e) {
+    var agencyBtn = e.target.closest("[data-agency-fill]");
+    if (agencyBtn) {
+      var agencyInput = document.getElementById("agency");
+      if (!agencyInput) return;
+      var next = (agencyBtn.getAttribute("data-agency-fill") || "").trim();
+      if (!next) return;
+
+      var parts = agencyInput.value
+        .split(",")
+        .map(function (part) {
+          return part.trim();
+        })
+        .filter(function (part) {
+          return part !== "";
+        });
+
+      var idx = parts.findIndex(function (part) {
+        return part.toLowerCase() === next.toLowerCase();
+      });
+      if (idx >= 0) {
+        parts.splice(idx, 1);
+      } else {
+        parts.push(next);
+      }
+
+      agencyInput.value = parts.join(", ");
+      agencyInput.focus();
+      return;
+    }
+
+    var btn = e.target.closest("[data-fb-comment-action]");
+    if (!btn) return;
+
+    var action = btn.getAttribute("data-fb-comment-action");
+    var datetime = btn.getAttribute("data-fb-datetime") || "";
+    if (!action || !datetime) return;
+
+    if (action === "cleared") {
+      var cleared = document.getElementById("cleared_at");
+      if (!cleared) return;
+      cleared.value = datetime;
+      cleared.focus();
+      return;
+    }
+
+    if (action === "update") {
+      var updateAt = document.getElementById("new_update_at");
+      var updateText = document.getElementById("new_update_text");
+      if (!updateAt || !updateText) return;
+      updateAt.value = datetime;
+      updateText.value = btn.getAttribute("data-fb-update-text") || "";
+
+      var toggle = document.getElementById("incident-aside-updates-toggle");
+      var body = document.getElementById("incident-aside-updates");
+      if (toggle && body) {
+        toggle.setAttribute("aria-expanded", "true");
+        body.hidden = false;
+      }
+      updateText.focus();
+    }
+  });
+
+  (function initPostsBulk() {
+    var form = document.getElementById("posts-bulk-form");
+    if (!form) return;
+    var selectAll = form.querySelector("[data-bulk-select-all]");
+    var applyBtn = document.getElementById("posts-bulk-apply");
+    var countEl = document.getElementById("posts-bulk-count");
+
+    function rowChecks(visibleOnly) {
+      return Array.prototype.slice.call(form.querySelectorAll("[data-bulk-row]")).filter(function (el) {
+        if (!visibleOnly) return true;
+        var tr = el.closest("tr");
+        return tr && !tr.hidden;
+      });
+    }
+
+    function syncBulkUi() {
+      var all = rowChecks(false);
+      var selected = all.filter(function (el) {
+        return el.checked;
+      });
+      var visible = rowChecks(true);
+      var visibleSelected = visible.filter(function (el) {
+        return el.checked;
+      });
+      if (applyBtn) applyBtn.disabled = selected.length === 0;
+      if (countEl) {
+        countEl.textContent =
+          selected.length === 0
+            ? "Select posts to update"
+            : selected.length + " selected";
+      }
+      if (selectAll && visible.length > 0) {
+        selectAll.checked = visibleSelected.length === visible.length;
+        selectAll.indeterminate = visibleSelected.length > 0 && visibleSelected.length < visible.length;
+      } else if (selectAll) {
+        selectAll.checked = false;
+        selectAll.indeterminate = false;
+      }
+    }
+
+    if (selectAll) {
+      selectAll.addEventListener("change", function () {
+        rowChecks(true).forEach(function (el) {
+          el.checked = selectAll.checked;
+        });
+        syncBulkUi();
+      });
+    }
+
+    form.addEventListener("change", function (e) {
+      if (e.target && e.target.matches("[data-bulk-row]")) {
+        syncBulkUi();
+      }
+    });
+
+    form.addEventListener("submit", function (e) {
+      if ((form.querySelector('input[name="action"]') || {}).value !== "bulk_status") return;
+      var selected = rowChecks(false).filter(function (el) {
+        return el.checked;
+      });
+      if (selected.length === 0) {
+        e.preventDefault();
+        return;
+      }
+      var statusSelect = document.getElementById("bulk_status");
+      var status = statusSelect ? statusSelect.value : "";
+      if (status === "trash") {
+        if (!confirm("Move " + selected.length + " selected post(s) to Trash?")) {
+          e.preventDefault();
+        }
+      }
+    });
+
+    // Pagination toggles row.hidden — keep select-all in sync.
+    var table = form.querySelector("table.admin-data-table");
+    if (table && typeof MutationObserver !== "undefined") {
+      var observer = new MutationObserver(function () {
+        syncBulkUi();
+      });
+      observer.observe(table, {
+        attributes: true,
+        subtree: true,
+        attributeFilter: ["hidden"],
+      });
+    }
+
+    syncBulkUi();
+  })();
 })();

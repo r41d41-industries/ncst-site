@@ -26,6 +26,7 @@ $categories = array_values(array_filter(
 ));
 $incidentSlugs = category_slugs_by_template('incident');
 $defaultCategory = $incidentSlugs[0] ?? '';
+$allowedStatuses = ['draft', 'published', 'trash'];
 $error = null;
 $form = [
     'category' => strtoupper((string) ($post['category'] ?? $defaultCategory)),
@@ -38,7 +39,9 @@ $form = [
     'image_media_id' => $post['image_media_id'] ?? '',
     'facebook_url' => $post['facebook_url'] ?? '',
     'x_url' => $post['x_url'] ?? '',
-    'published' => !empty($post['published']),
+    'status' => $isEdit
+        ? (!empty($post['published']) ? 'published' : 'draft')
+        : 'draft',
     'new_update_at' => '',
     'new_update_text' => '',
 ];
@@ -65,7 +68,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $form['image_path'] = trim((string) ($_POST['image_path'] ?? ''));
     $form['facebook_url'] = trim((string) ($_POST['facebook_url'] ?? ''));
     $form['x_url'] = trim((string) ($_POST['x_url'] ?? ''));
-    $form['published'] = isset($_POST['published']);
+    $statusInput = strtolower(trim((string) ($_POST['status'] ?? 'draft')));
+    $form['status'] = in_array($statusInput, $allowedStatuses, true) ? $statusInput : 'draft';
     $form['new_update_at'] = trim((string) ($_POST['new_update_at'] ?? ''));
     $form['new_update_text'] = trim((string) ($_POST['new_update_text'] ?? ''));
     $removeImage = isset($_POST['remove_image']);
@@ -75,6 +79,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $dispatchedAt = cs_parse_datetime_input($form['dispatched_at']);
     $clearedAt = cs_parse_datetime_input($form['cleared_at']);
     $newUpdateAt = cs_parse_datetime_input($form['new_update_at']);
+    // Trash keeps the prior published flag so restore returns draft/published correctly.
+    $published = $form['status'] === 'published'
+        || ($form['status'] === 'trash' && $isEdit && !empty($post['published']));
 
     if (!in_array($form['category'], $incidentSlugs, true)
         || category_template($form['category']) !== 'incident') {
@@ -138,7 +145,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'og_image_media_id' => null,
                 'gallery_id' => null,
                 'playlist_id' => null,
-                'published' => $form['published'],
+                'published' => $published,
             ];
 
             if ($isEdit) {
@@ -155,8 +162,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ]);
             }
 
+            if ($form['status'] === 'trash') {
+                posts_trash($postId);
+                flash_set('success', $isEdit ? 'Incident moved to trash.' : 'Incident created and moved to trash.');
+                redirect('/admin/?status=trash');
+            }
+
             flash_set('success', $isEdit ? 'Incident updated.' : 'Incident created.');
-            redirect('/admin/');
+            if ($isEdit) {
+                redirect('/admin/post_incident.php?id=' . $postId);
+            }
+            redirect('/admin/?status=' . ($published ? 'published' : 'draft'));
         } catch (Throwable $e) {
             $error = $e->getMessage();
         }
@@ -167,6 +183,12 @@ $adminPageTitle = ($isEdit ? 'Edit' : 'New') . ' Incident';
 $adminSection = 'posts';
 $adminPanelTitle = 'Posts';
 $adminShowAdd = true;
+
+$fbSource = $isEdit ? facebook_post_by_cs_post_id($id) : null;
+$fbComments = $fbSource !== null ? facebook_page_comments_for_cs_post($id) : null;
+$agencyQuickFills = incident_agencies_list();
+$flash = flash_get('success');
+
 require dirname(__DIR__) . '/includes/partials/admin_shell_start.php';
 ?>
         <div class="admin-content__header">
@@ -177,6 +199,9 @@ require dirname(__DIR__) . '/includes/partials/admin_shell_start.php';
           <a class="tu-btn tu-btn--secondary" href="/admin/">Back to posts</a>
         </div>
 
+        <?php if ($flash): ?>
+          <div class="tu-alert tu-alert--success" role="status"><?= e($flash) ?></div>
+        <?php endif; ?>
         <?php if ($error): ?>
           <div class="tu-alert tu-alert--danger" role="alert"><?= e($error) ?></div>
         <?php endif; ?>
@@ -185,6 +210,7 @@ require dirname(__DIR__) . '/includes/partials/admin_shell_start.php';
         <?php endif; ?>
 
         <div class="admin-incident-layout">
+          <div class="admin-incident-layout__main">
           <div class="tu-card">
             <form id="incident-form" method="post" enctype="multipart/form-data" action="">
               <input type="hidden" name="action" value="save">
@@ -206,8 +232,22 @@ require dirname(__DIR__) . '/includes/partials/admin_shell_start.php';
                 <textarea id="body" name="body" required><?= e((string) $form['body']) ?></textarea>
               </div>
               <div class="tu-form-row">
-                <label for="agency">Agencies value (ORG or BADGE|ORG)</label>
+                <label for="agency">Agencies value (ORG or BADGE|ORG, comma-separated)</label>
                 <input id="agency" name="agency" type="text" value="<?= e((string) $form['agency']) ?>">
+                <?php if ($agencyQuickFills !== []): ?>
+                  <div class="agency-quick-fills" role="group" aria-label="Agency quick fill">
+                    <?php foreach ($agencyQuickFills as $agencyValue): ?>
+                      <button
+                        type="button"
+                        class="tu-btn tu-btn--secondary agency-quick-fills__btn"
+                        data-agency-fill="<?= e($agencyValue) ?>"
+                      ><?= e($agencyValue) ?></button>
+                    <?php endforeach; ?>
+                  </div>
+                  <p class="tu-help">Click to add; click again to remove. Multiple agencies are saved as a comma-separated list.</p>
+                <?php else: ?>
+                  <p class="tu-help">Add quick-fill agencies under <a href="/admin/settings/agencies.php">Settings → Posts → Agencies</a>.</p>
+                <?php endif; ?>
               </div>
               <div class="tu-form-row">
                 <label for="dispatched_at">Dispatched date/time</label>
@@ -217,89 +257,219 @@ require dirname(__DIR__) . '/includes/partials/admin_shell_start.php';
                 <label for="cleared_at">Cleared date/time</label>
                 <input id="cleared_at" name="cleared_at" type="datetime-local" value="<?= e((string) $form['cleared_at']) ?>">
               </div>
-              <div class="tu-form-row">
-                <label class="tu-check" for="published">
-                  <input id="published" type="checkbox" name="published" value="1"<?= !empty($form['published']) ? ' checked' : '' ?>>
-                  Published (visible on public feed)
-                </label>
-              </div>
-              <div class="tu-actions">
-                <button class="tu-btn tu-btn--brand" type="submit"<?= $categories === [] ? ' disabled' : '' ?>><?= $isEdit ? 'Save changes' : 'Create incident' ?></button>
-                <a class="tu-btn tu-btn--tertiary" href="/admin/">Cancel</a>
-              </div>
             </form>
           </div>
 
+          <?php if ($fbComments !== null): ?>
+            <div class="tu-card">
+              <h2>Facebook comments</h2>
+              <p class="tu-help">Page-authored comments on the linked Facebook post, oldest first. Synced with Sync Now.</p>
+              <div class="tu-table-wrap">
+                <table class="tu-table" aria-label="Facebook Page comments">
+                  <thead>
+                    <tr>
+                      <th scope="col">When</th>
+                      <th scope="col">Author</th>
+                      <th scope="col">Comment</th>
+                      <th scope="col">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <?php if ($fbComments === []): ?>
+                      <tr>
+                        <td colspan="4" class="tu-empty">No Page comments yet.</td>
+                      </tr>
+                    <?php else: ?>
+                      <?php foreach ($fbComments as $comment): ?>
+                        <?php
+                          $created = (string) ($comment['fb_created_time'] ?? '');
+                          $message = (string) ($comment['message'] ?? '');
+                          $author = trim((string) ($comment['from_name'] ?? ''));
+                          if ($author === '') {
+                              $author = 'Page';
+                          }
+                          $actionType = facebook_comment_action_type($message);
+                          $localDt = $created !== '' ? cs_datetime_local_value($created) : '';
+                          $updateText = $actionType === 'update' ? facebook_comment_update_text($message) : '';
+                        ?>
+                        <tr>
+                          <td data-sort-value="<?= e($created) ?>">
+                            <?= e($created !== '' ? cs_format_event_time($created) : '—') ?>
+                            <?php if ($created !== ''): ?>
+                              <br><small><?= e($created) ?></small>
+                            <?php endif; ?>
+                          </td>
+                          <td><?= e($author) ?></td>
+                          <td><?= e($message) ?></td>
+                          <td style="white-space:nowrap;">
+                            <?php if ($actionType === 'cleared' && $localDt !== ''): ?>
+                              <button
+                                type="button"
+                                class="tu-btn tu-btn--secondary"
+                                data-fb-comment-action="cleared"
+                                data-fb-datetime="<?= e($localDt) ?>"
+                              >Use as cleared</button>
+                            <?php elseif ($actionType === 'update' && $localDt !== ''): ?>
+                              <button
+                                type="button"
+                                class="tu-btn tu-btn--secondary"
+                                data-fb-comment-action="update"
+                                data-fb-datetime="<?= e($localDt) ?>"
+                                data-fb-update-text="<?= e($updateText) ?>"
+                              >Use as update</button>
+                            <?php else: ?>
+                              —
+                            <?php endif; ?>
+                          </td>
+                        </tr>
+                      <?php endforeach; ?>
+                    <?php endif; ?>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          <?php endif; ?>
+          </div>
+
           <div class="admin-incident-layout__aside">
-            <div class="tu-card">
-              <h2>Add update</h2>
-              <?php if ($isEdit && $updates !== []): ?>
+            <div class="tu-card admin-collapse-card" data-admin-collapse>
+              <button
+                type="button"
+                class="admin-collapse-card__toggle"
+                id="incident-aside-status-toggle"
+                aria-expanded="true"
+                aria-controls="incident-aside-status"
+              >
+                <span class="admin-collapse-card__title">Status</span>
+                <svg class="admin-collapse-card__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path d="M6 9l6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
+              <div class="admin-collapse-card__body" id="incident-aside-status" role="region" aria-labelledby="incident-aside-status-toggle">
                 <div class="tu-form-row">
-                  <span class="tu-label" id="update-timeline-label">Update timeline (newest first)</span>
-                  <ul class="tu-update-list" aria-labelledby="update-timeline-label">
-                    <?php foreach ($updates as $update): ?>
-                      <li class="tu-update-list__item">
-                        <div>
-                          <strong>UPDATE: <?= e(cs_format_event_time((string) ($update['created_at'] ?? ''))) ?></strong>
-                          <p><?= e((string) ($update['body'] ?? '')) ?></p>
-                          <small><?= e((string) ($update['created_at'] ?? '')) ?></small>
-                        </div>
-                        <?php if (!empty($update['id'])): ?>
-                          <form method="post" action="" onsubmit="return confirm('Delete this update?');">
-                            <input type="hidden" name="action" value="delete_update">
-                            <input type="hidden" name="update_id" value="<?= e((string) $update['id']) ?>">
-                            <button class="tu-btn tu-btn--secondary" type="submit">Delete</button>
-                          </form>
-                        <?php endif; ?>
-                      </li>
-                    <?php endforeach; ?>
-                  </ul>
+                  <label for="status">Post status</label>
+                  <select id="status" name="status" form="incident-form">
+                    <option value="draft"<?= $form['status'] === 'draft' ? ' selected' : '' ?>>Draft</option>
+                    <option value="published"<?= $form['status'] === 'published' ? ' selected' : '' ?>>Published</option>
+                    <option value="trash"<?= $form['status'] === 'trash' ? ' selected' : '' ?>>Trash</option>
+                  </select>
+                  <p class="tu-help">Draft and Published control the public feed. Trash moves the post out of the library (restore from Trash).</p>
                 </div>
-              <?php endif; ?>
-              <div class="tu-form-row">
-                <label for="new_update_at">Add update date/time</label>
-                <input id="new_update_at" name="new_update_at" type="datetime-local" form="incident-form" value="<?= e((string) $form['new_update_at']) ?>">
-              </div>
-              <div class="tu-form-row">
-                <label for="new_update_text">Add update text</label>
-                <textarea id="new_update_text" name="new_update_text" form="incident-form"><?= e((string) $form['new_update_text']) ?></textarea>
-              </div>
-            </div>
-
-            <div class="tu-card">
-              <h2>Image</h2>
-              <div class="tu-form-row">
-                <div class="media-field" data-media-field data-media-kind="image">
-                  <input type="hidden" name="image_media_id" form="incident-form" data-media-id value="<?= e((string) $form['image_media_id']) ?>">
-                  <input type="hidden" name="image_path" form="incident-form" data-media-path value="<?= e((string) $form['image_path']) ?>">
-                  <div class="media-field__preview">
-                    <img class="media-field__thumb" data-media-thumb src="<?= !empty($form['image_path']) ? e('/' . ltrim((string) $form['image_path'], '/')) : '' ?>" alt=""<?= empty($form['image_path']) ? ' hidden' : '' ?>>
-                    <span data-media-label><?= !empty($form['image_path']) || !empty($form['image_media_id']) ? e((string) ($form['image_path'] ?: ('Media #' . $form['image_media_id']))) : 'No media selected' ?></span>
-                  </div>
-                  <div class="media-field__actions">
-                    <button type="button" class="tu-btn tu-btn--secondary" data-media-choose>Choose from library</button>
-                    <button type="button" class="tu-btn tu-btn--tertiary" data-media-clear>Clear</button>
-                  </div>
-                  <label class="tu-check" style="margin-top:8px;">
-                    <input type="checkbox" name="remove_image" value="1" form="incident-form">
-                    Remove image on save
-                  </label>
-                  <p class="tu-help" style="margin-top:8px;">Or upload a new file:</p>
-                  <label class="admin-sr-only" for="image">Upload image</label>
-                  <input id="image" name="image" type="file" accept="image/jpeg,image/png,image/webp,image/gif" form="incident-form">
+                <div class="tu-actions">
+                  <button class="tu-btn tu-btn--brand" type="submit" form="incident-form"<?= $categories === [] ? ' disabled' : '' ?>><?= $isEdit ? 'Save changes' : 'Create incident' ?></button>
+                  <a class="tu-btn tu-btn--tertiary" href="/admin/">Cancel</a>
                 </div>
               </div>
             </div>
 
-            <div class="tu-card">
-              <h2>Social</h2>
-              <div class="tu-form-row">
-                <label for="facebook_url">Facebook link</label>
-                <input id="facebook_url" name="facebook_url" type="url" form="incident-form" placeholder="https://www.facebook.com/..." value="<?= e((string) $form['facebook_url']) ?>">
+            <div class="tu-card admin-collapse-card" data-admin-collapse>
+              <button
+                type="button"
+                class="admin-collapse-card__toggle"
+                id="incident-aside-updates-toggle"
+                aria-expanded="true"
+                aria-controls="incident-aside-updates"
+              >
+                <span class="admin-collapse-card__title">Add update</span>
+                <svg class="admin-collapse-card__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path d="M6 9l6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
+              <div class="admin-collapse-card__body" id="incident-aside-updates" role="region" aria-labelledby="incident-aside-updates-toggle">
+                <?php if ($isEdit && $updates !== []): ?>
+                  <div class="tu-form-row">
+                    <span class="tu-label" id="update-timeline-label">Update timeline (newest first)</span>
+                    <ul class="tu-update-list" aria-labelledby="update-timeline-label">
+                      <?php foreach ($updates as $update): ?>
+                        <li class="tu-update-list__item">
+                          <div>
+                            <strong>UPDATE: <?= e(cs_format_event_time((string) ($update['created_at'] ?? ''))) ?></strong>
+                            <p><?= e((string) ($update['body'] ?? '')) ?></p>
+                            <small><?= e((string) ($update['created_at'] ?? '')) ?></small>
+                          </div>
+                          <?php if (!empty($update['id'])): ?>
+                            <form method="post" action="" onsubmit="return confirm('Delete this update?');">
+                              <input type="hidden" name="action" value="delete_update">
+                              <input type="hidden" name="update_id" value="<?= e((string) $update['id']) ?>">
+                              <button class="tu-btn tu-btn--secondary" type="submit">Delete</button>
+                            </form>
+                          <?php endif; ?>
+                        </li>
+                      <?php endforeach; ?>
+                    </ul>
+                  </div>
+                <?php endif; ?>
+                <div class="tu-form-row">
+                  <label for="new_update_at">Add update date/time</label>
+                  <input id="new_update_at" name="new_update_at" type="datetime-local" form="incident-form" value="<?= e((string) $form['new_update_at']) ?>">
+                </div>
+                <div class="tu-form-row">
+                  <label for="new_update_text">Add update text</label>
+                  <textarea id="new_update_text" name="new_update_text" form="incident-form"><?= e((string) $form['new_update_text']) ?></textarea>
+                </div>
               </div>
-              <div class="tu-form-row">
-                <label for="x_url">X link</label>
-                <input id="x_url" name="x_url" type="url" form="incident-form" placeholder="https://x.com/..." value="<?= e((string) $form['x_url']) ?>">
+            </div>
+
+            <div class="tu-card admin-collapse-card" data-admin-collapse>
+              <button
+                type="button"
+                class="admin-collapse-card__toggle"
+                id="incident-aside-image-toggle"
+                aria-expanded="true"
+                aria-controls="incident-aside-image"
+              >
+                <span class="admin-collapse-card__title">Image</span>
+                <svg class="admin-collapse-card__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path d="M6 9l6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
+              <div class="admin-collapse-card__body" id="incident-aside-image" role="region" aria-labelledby="incident-aside-image-toggle">
+                <div class="tu-form-row">
+                  <div class="media-field" data-media-field data-media-kind="image">
+                    <input type="hidden" name="image_media_id" form="incident-form" data-media-id value="<?= e((string) $form['image_media_id']) ?>">
+                    <input type="hidden" name="image_path" form="incident-form" data-media-path value="<?= e((string) $form['image_path']) ?>">
+                    <div class="media-field__preview">
+                      <img class="media-field__thumb" data-media-thumb src="<?= !empty($form['image_path']) ? e('/' . ltrim((string) $form['image_path'], '/')) : '' ?>" alt=""<?= empty($form['image_path']) ? ' hidden' : '' ?>>
+                      <span data-media-label><?= !empty($form['image_path']) || !empty($form['image_media_id']) ? e((string) ($form['image_path'] ?: ('Media #' . $form['image_media_id']))) : 'No media selected' ?></span>
+                    </div>
+                    <div class="media-field__actions">
+                      <button type="button" class="tu-btn tu-btn--secondary" data-media-choose>Choose from library</button>
+                      <button type="button" class="tu-btn tu-btn--tertiary" data-media-clear>Clear</button>
+                    </div>
+                    <label class="tu-check" style="margin-top:8px;">
+                      <input type="checkbox" name="remove_image" value="1" form="incident-form">
+                      Remove image on save
+                    </label>
+                    <p class="tu-help" style="margin-top:8px;">Or upload a new file:</p>
+                    <label class="admin-sr-only" for="image">Upload image</label>
+                    <input id="image" name="image" type="file" accept="image/jpeg,image/png,image/webp,image/gif" form="incident-form">
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="tu-card admin-collapse-card" data-admin-collapse>
+              <button
+                type="button"
+                class="admin-collapse-card__toggle"
+                id="incident-aside-social-toggle"
+                aria-expanded="true"
+                aria-controls="incident-aside-social"
+              >
+                <span class="admin-collapse-card__title">Social</span>
+                <svg class="admin-collapse-card__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path d="M6 9l6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
+              <div class="admin-collapse-card__body" id="incident-aside-social" role="region" aria-labelledby="incident-aside-social-toggle">
+                <div class="tu-form-row">
+                  <label for="facebook_url">Facebook link</label>
+                  <input id="facebook_url" name="facebook_url" type="url" form="incident-form" placeholder="https://www.facebook.com/..." value="<?= e((string) $form['facebook_url']) ?>">
+                </div>
+                <div class="tu-form-row">
+                  <label for="x_url">X link</label>
+                  <input id="x_url" name="x_url" type="url" form="incident-form" placeholder="https://x.com/..." value="<?= e((string) $form['x_url']) ?>">
+                </div>
               </div>
             </div>
           </div>

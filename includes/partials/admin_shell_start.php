@@ -28,6 +28,8 @@ if ($adminTypeFilter === 'all' || $adminTypeFilter === '') {
 if ($adminTypeFilter !== null && !in_array($adminTypeFilter, ['incident', 'article'], true)) {
     $adminTypeFilter = null;
 }
+/** @var string $adminPostsPage all|facebook|'' */
+$adminPostsPage = isset($adminPostsPage) ? (string) $adminPostsPage : '';
 
 $username = (string) (auth_username() ?? 'Admin');
 $displayName = (string) (auth_display_name() ?: $username);
@@ -52,15 +54,20 @@ $allPostsCount = $statusCounts['all'];
 $isAllPostsActive = $adminSection === 'posts'
     && $adminCategoryFilter === null
     && $adminStatusFilter === null
-    && $adminTypeFilter === null;
+    && $adminTypeFilter === null
+    && ($adminPostsPage === '' || $adminPostsPage === 'all');
 $isIncidentsActive = $adminSection === 'posts'
     && $adminStatusFilter === null
     && $adminCategoryFilter === null
-    && $adminTypeFilter === 'incident';
+    && $adminTypeFilter === 'incident'
+    && $adminPostsPage === '';
 $isArticlesActive = $adminSection === 'posts'
     && $adminStatusFilter === null
     && $adminCategoryFilter === null
-    && $adminTypeFilter === 'article';
+    && $adminTypeFilter === 'article'
+    && $adminPostsPage === '';
+$isFacebookPostsActive = $adminSection === 'posts'
+    && $adminPostsPage === 'facebook';
 $adminMediaPage = isset($adminMediaPage) ? (string) $adminMediaPage : '';
 $panelSearchPlaceholders = [
     'posts' => 'Search posts…',
@@ -263,6 +270,15 @@ $panelSearchLabel = $adminSection === 'posts' ? 'Filter posts' : 'Filter ' . $ad
                   </a>
                 </li>
                 <li>
+                  <a
+                    class="admin-panel__link<?= $isFacebookPostsActive ? ' is-active' : '' ?>"
+                    href="/admin/facebook/posts.php"
+                    <?= $isFacebookPostsActive ? 'aria-current="page"' : '' ?>
+                  >
+                    Facebook
+                  </a>
+                </li>
+                <li>
                   <button
                     type="button"
                     class="admin-panel__toggle"
@@ -413,7 +429,13 @@ $panelSearchLabel = $adminSection === 'posts' ? 'Filter posts' : 'Filter ' . $ad
                 $adminSettingsPage = isset($adminSettingsPage) ? (string) $adminSettingsPage : '';
                 $isSettingsPostsActive = $adminSettingsPage === 'posts';
                 $isSettingsShortcodesActive = $adminSettingsPage === 'shortcodes';
-                $settingsPostsSubOpen = $isSettingsPostsActive || $isSettingsShortcodesActive;
+                $isSettingsAgenciesActive = $adminSettingsPage === 'agencies';
+                $settingsPostsSubOpen = $isSettingsPostsActive || $isSettingsShortcodesActive || $isSettingsAgenciesActive;
+                $isFbCredentialsActive = $adminSettingsPage === 'facebook-credentials';
+                $isFbCronActive = $adminSettingsPage === 'facebook-cron';
+                $isFbImportActive = $adminSettingsPage === 'facebook-import';
+                $isFbHashtagsActive = $adminSettingsPage === 'facebook-hashtags';
+                $settingsFacebookSubOpen = $isFbCredentialsActive || $isFbCronActive || $isFbImportActive || $isFbHashtagsActive;
               ?>
               <ul class="admin-panel__nav" aria-label="Settings">
                 <li>
@@ -453,6 +475,13 @@ $panelSearchLabel = $adminSection === 'posts' ? 'Filter posts' : 'Filter ' . $ad
                         <?= $isSettingsShortcodesActive ? 'aria-current="page"' : '' ?>
                       >Shortcodes</a>
                     </li>
+                    <li>
+                      <a
+                        class="admin-panel__link<?= $isSettingsAgenciesActive ? ' is-active' : '' ?>"
+                        href="/admin/settings/agencies.php"
+                        <?= $isSettingsAgenciesActive ? 'aria-current="page"' : '' ?>
+                      >Agencies</a>
+                    </li>
                   </ul>
                 </li>
                 <li>
@@ -461,6 +490,54 @@ $panelSearchLabel = $adminSection === 'posts' ? 'Filter posts' : 'Filter ' . $ad
                     href="/admin/settings/open-graph.php"
                     <?= $adminSettingsPage === 'open-graph' ? 'aria-current="page"' : '' ?>
                   >Open Graph</a>
+                </li>
+                <li>
+                  <button
+                    type="button"
+                    class="admin-panel__toggle"
+                    data-nav-toggle
+                    aria-expanded="<?= $settingsFacebookSubOpen ? 'true' : 'false' ?>"
+                    aria-controls="admin-settings-facebook-sub"
+                  >
+                    Facebook Sync
+                    <svg class="admin-panel__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                      <path d="M6 9l6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                  </button>
+                  <ul
+                    id="admin-settings-facebook-sub"
+                    class="admin-panel__sub<?= $settingsFacebookSubOpen ? ' is-open' : '' ?>"
+                    <?= $settingsFacebookSubOpen ? '' : 'hidden' ?>
+                  >
+                    <li>
+                      <a
+                        class="admin-panel__link<?= $isFbCredentialsActive ? ' is-active' : '' ?>"
+                        href="/admin/settings/facebook/credentials.php"
+                        <?= $isFbCredentialsActive ? 'aria-current="page"' : '' ?>
+                      >Credentials</a>
+                    </li>
+                    <li>
+                      <a
+                        class="admin-panel__link<?= $isFbCronActive ? ' is-active' : '' ?>"
+                        href="/admin/settings/facebook/cron.php"
+                        <?= $isFbCronActive ? 'aria-current="page"' : '' ?>
+                      >Cron</a>
+                    </li>
+                    <li>
+                      <a
+                        class="admin-panel__link<?= $isFbImportActive ? ' is-active' : '' ?>"
+                        href="/admin/settings/facebook/import.php"
+                        <?= $isFbImportActive ? 'aria-current="page"' : '' ?>
+                      >Import</a>
+                    </li>
+                    <li>
+                      <a
+                        class="admin-panel__link<?= $isFbHashtagsActive ? ' is-active' : '' ?>"
+                        href="/admin/settings/facebook/hashtags.php"
+                        <?= $isFbHashtagsActive ? 'aria-current="page"' : '' ?>
+                      >Hashtags</a>
+                    </li>
+                  </ul>
                 </li>
                 <li>
                   <span class="admin-panel__link is-disabled" aria-disabled="true" title="Coming soon">

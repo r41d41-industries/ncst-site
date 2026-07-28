@@ -59,6 +59,56 @@ function settings_set_many(array $pairs): void
 }
 
 /**
+ * Agency quick-fill values for the incident form (ORG or BADGE|ORG).
+ *
+ * @return list<string>
+ */
+function incident_agencies_list(): array
+{
+    $raw = settings_get('incident_agencies');
+    if ($raw === null || $raw === '') {
+        return [];
+    }
+    $decoded = json_decode($raw, true);
+    if (!is_array($decoded)) {
+        return [];
+    }
+    $out = [];
+    foreach ($decoded as $item) {
+        $value = trim((string) $item);
+        if ($value === '') {
+            continue;
+        }
+        $out[] = $value;
+    }
+    return array_values(array_unique($out));
+}
+
+/**
+ * @param list<string> $values
+ */
+function incident_agencies_save(array $values): void
+{
+    $clean = [];
+    foreach ($values as $item) {
+        $value = trim((string) $item);
+        if ($value === '') {
+            continue;
+        }
+        if (strlen($value) > 128) {
+            $value = substr($value, 0, 128);
+        }
+        $clean[] = $value;
+    }
+    $clean = array_values(array_unique($clean));
+    $json = json_encode($clean, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    if ($json === false) {
+        throw new RuntimeException('Unable to save agencies.');
+    }
+    settings_set('incident_agencies', $json === '[]' ? null : $json);
+}
+
+/**
  * Site-wide Open Graph defaults.
  *
  * @return array{title: string, description: string, site_name: string, type: string, image_path: ?string}

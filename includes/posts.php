@@ -299,6 +299,59 @@ function posts_restore(int $id): void
     $stmt->execute([$id]);
 }
 
+/**
+ * Set admin list status: draft, published, or trash.
+ */
+function posts_set_status(int $id, string $status): bool
+{
+    $status = strtolower(trim($status));
+    if (!in_array($status, ['draft', 'published', 'trash'], true)) {
+        throw new InvalidArgumentException('Invalid status.');
+    }
+
+    $post = posts_find($id);
+    if ($post === null) {
+        return false;
+    }
+
+    if ($status === 'trash') {
+        if (!posts_is_trashed($post)) {
+            posts_trash($id);
+        }
+        return true;
+    }
+
+    if (posts_is_trashed($post)) {
+        posts_restore($id);
+    }
+
+    $table = posts_table();
+    $stmt = db()->prepare(
+        "UPDATE `{$table}` SET published = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+    );
+    $stmt->execute([$status === 'published' ? 1 : 0, $id]);
+    return true;
+}
+
+/**
+ * @param list<int|string> $ids
+ * @return int Number of posts updated
+ */
+function posts_bulk_set_status(array $ids, string $status): int
+{
+    $count = 0;
+    foreach ($ids as $rawId) {
+        $id = (int) $rawId;
+        if ($id <= 0) {
+            continue;
+        }
+        if (posts_set_status($id, $status)) {
+            $count++;
+        }
+    }
+    return $count;
+}
+
 function posts_delete(int $id): void
 {
     $updates = posts_updates_table();
@@ -356,28 +409,23 @@ function posts_find(int $id): ?array
 function posts_create(array $data): int
 {
     $table = posts_table();
-    $sql = "INSERT INTO `{$table}` (
-        category, title, body, article_body, footnotes, update_label, update_text,
-        agency, dispatched_at, cleared_at, recorded_at, expires_at, dispatched_text, status_text,
-        image_path, image_media_id, facebook_url, x_url, read_more_url,
-        og_title, og_description, og_image_path, og_image_media_id, gallery_id, playlist_id, published
-    ) VALUES (
-        :category, :title, :body, :article_body, :footnotes, :update_label, :update_text,
-        :agency, :dispatched_at, :cleared_at, :recorded_at, :expires_at, :dispatched_text, :status_text,
-        :image_path, :image_media_id, :facebook_url, :x_url, :read_more_url,
-        :og_title, :og_description, :og_image_path, :og_image_media_id, :gallery_id, :playlist_id, :published
-    )";
-    $stmt = db()->prepare($sql);
-    $footnotes = $data['footnotes'] ?? null;
-    if (is_array($footnotes)) {
-        $footnotes = json_encode(posts_normalize_footnotes($footnotes), JSON_UNESCAPED_UNICODE);
-    }
-    $stmt->execute([
+    $createdAt = isset($data['created_at']) ? trim((string) $data['created_at']) : '';
+    $updatedAt = isset($data['updated_at']) ? trim((string) $data['updated_at']) : '';
+    $hasCreated = $createdAt !== '';
+    $hasUpdated = $updatedAt !== '';
+
+    $columns = [
+        'category', 'title', 'body', 'article_body', 'footnotes', 'update_label', 'update_text',
+        'agency', 'dispatched_at', 'cleared_at', 'recorded_at', 'expires_at', 'dispatched_text', 'status_text',
+        'image_path', 'image_media_id', 'facebook_url', 'x_url', 'read_more_url',
+        'og_title', 'og_description', 'og_image_path', 'og_image_media_id', 'gallery_id', 'playlist_id', 'published',
+    ];
+    $params = [
         ':category' => $data['category'],
         ':title' => $data['title'],
         ':body' => $data['body'],
         ':article_body' => $data['article_body'] ?? null,
-        ':footnotes' => $footnotes,
+        ':footnotes' => null,
         ':update_label' => $data['update_label'] ?? null,
         ':update_text' => $data['update_text'] ?? null,
         ':agency' => $data['agency'] ?? null,
@@ -399,7 +447,27 @@ function posts_create(array $data): int
         ':gallery_id' => $data['gallery_id'] ?? null,
         ':playlist_id' => $data['playlist_id'] ?? null,
         ':published' => !empty($data['published']) ? 1 : 0,
-    ]);
+    ];
+
+    $footnotes = $data['footnotes'] ?? null;
+    if (is_array($footnotes)) {
+        $footnotes = json_encode(posts_normalize_footnotes($footnotes), JSON_UNESCAPED_UNICODE);
+    }
+    $params[':footnotes'] = $footnotes;
+
+    if ($hasCreated) {
+        $columns[] = 'created_at';
+        $params[':created_at'] = $createdAt;
+    }
+    if ($hasUpdated) {
+        $columns[] = 'updated_at';
+        $params[':updated_at'] = $updatedAt;
+    }
+
+    $placeholders = array_map(static fn(string $col): string => ':' . $col, $columns);
+    $sql = 'INSERT INTO `' . $table . '` (' . implode(', ', $columns) . ') VALUES (' . implode(', ', $placeholders) . ')';
+    $stmt = db()->prepare($sql);
+    $stmt->execute($params);
     return (int) db()->lastInsertId();
 }
 

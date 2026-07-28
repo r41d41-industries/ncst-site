@@ -949,6 +949,13 @@ html.admin-panel-collapsed-pending .admin-main {
   min-width: 0;
 }
 
+.admin-incident-layout__main {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-width: 0;
+}
+
 .admin-collapse-card.tu-card {
   padding: 0;
   overflow: hidden;
@@ -1087,6 +1094,60 @@ html.admin-panel-collapsed-pending .admin-main {
   flex-wrap: wrap;
   align-items: center;
   gap: 12px 16px;
+}
+
+.admin-bulk-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: var(--tu-neutral-secondary-soft, #f5f5f4);
+  border: 1px solid var(--tu-border-default);
+  border-radius: var(--tu-radius-base);
+}
+
+.admin-bulk-bar__label {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--tu-heading);
+}
+
+.admin-bulk-bar .tu-input,
+.admin-bulk-bar select {
+  min-width: 10rem;
+  width: auto;
+}
+
+.admin-bulk-bar__hint {
+  font-size: 13px;
+  color: var(--tu-body);
+}
+
+.admin-bulk-check-col {
+  width: 2.5rem;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.admin-bulk-check-col input[type="checkbox"] {
+  margin: 0;
+}
+
+.agency-quick-fills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.agency-quick-fills__btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  line-height: 1.3;
+  min-height: 0;
 }
 
 .admin-data-table__search-wrap {

@@ -36,9 +36,6 @@ if ($updates === []) {
 }
 $updateCount = count($updates);
 $hasUpdate = $isIncident && $updateCount > 0;
-$latest = $hasUpdate ? $updates[0] : null;
-$older = $hasUpdate ? array_slice($updates, 1) : [];
-$hasTimeline = count($older) > 0;
 
 $dispatchedAt = isset($post['dispatched_at']) ? trim((string) $post['dispatched_at']) : '';
 $clearedAt = isset($post['cleared_at']) ? trim((string) $post['cleared_at']) : '';
@@ -91,58 +88,29 @@ $articleClass = 'post post--' . $layout;
       </div>
     <?php endif; ?>
 
-    <?php if ($isIncident && $hasUpdate && is_array($latest)): ?>
-      <?php
-        $latestTime = '';
-        if (!empty($latest['created_at'])) {
-            $latestTime = cs_format_event_time((string) $latest['created_at']);
-        } else {
-            $latestTime = cs_update_time_value($latest['label'] ?? null);
-        }
-        $latestBody = trim((string) ($latest['body'] ?? ''));
-        $panelId = 'updates-' . $id;
-      ?>
-      <div class="post__update" data-update-panel>
-        <div class="post__update-latest">
-          <p class="post__update-label">UPDATE:<?= $latestTime !== '' ? ' ' . e($latestTime) : '' ?></p>
-          <?php if ($latestBody !== ''): ?>
-            <p class="post__update-text"><?= e($latestBody) ?></p>
-          <?php endif; ?>
+    <?php if ($hasUpdate): ?>
+      <div class="post__update">
+        <div class="post__update-timeline" id="updates-<?= e((string) $id) ?>">
+          <ol class="update-timeline">
+            <?php foreach ($updates as $entry): ?>
+              <?php
+                $entryTime = '';
+                if (!empty($entry['created_at'])) {
+                    $entryTime = cs_format_event_time((string) $entry['created_at']);
+                } else {
+                    $entryTime = cs_update_time_value($entry['label'] ?? null);
+                }
+                $entryBody = trim((string) ($entry['body'] ?? ''));
+              ?>
+              <li class="update-timeline__item">
+                <p class="post__update-label">UPDATE:<?= $entryTime !== '' ? ' ' . e($entryTime) : '' ?></p>
+                <?php if ($entryBody !== ''): ?>
+                  <p class="post__update-text"><?= e($entryBody) ?></p>
+                <?php endif; ?>
+              </li>
+            <?php endforeach; ?>
+          </ol>
         </div>
-
-        <?php if ($hasTimeline): ?>
-          <button
-            type="button"
-            class="post__update-toggle"
-            data-update-toggle
-            aria-expanded="false"
-            aria-controls="<?= e($panelId) ?>"
-          >
-            <span class="post__update-toggle-text">Show <?= e((string) count($older)) ?> earlier update<?= count($older) === 1 ? '' : 's' ?></span>
-            <span class="post__update-toggle-chevron" aria-hidden="true"></span>
-          </button>
-          <div class="post__update-timeline" id="<?= e($panelId) ?>" hidden data-update-timeline>
-            <ol class="update-timeline">
-              <?php foreach ($older as $entry): ?>
-                <?php
-                  $entryTime = '';
-                  if (!empty($entry['created_at'])) {
-                      $entryTime = cs_format_event_time((string) $entry['created_at']);
-                  } else {
-                      $entryTime = cs_update_time_value($entry['label'] ?? null);
-                  }
-                  $entryBody = trim((string) ($entry['body'] ?? ''));
-                ?>
-                <li class="update-timeline__item">
-                  <p class="post__update-label">UPDATE:<?= $entryTime !== '' ? ' ' . e($entryTime) : '' ?></p>
-                  <?php if ($entryBody !== ''): ?>
-                    <p class="post__update-text"><?= e($entryBody) ?></p>
-                  <?php endif; ?>
-                </li>
-              <?php endforeach; ?>
-            </ol>
-          </div>
-        <?php endif; ?>
       </div>
     <?php endif; ?>
 

@@ -57,32 +57,6 @@
     });
   });
 
-  // Expand / collapse update timelines (works for infinite-scroll cards too)
-  document.addEventListener("click", (event) => {
-    const target = event.target;
-    if (!(target instanceof HTMLElement)) return;
-    const toggle = target.closest("[data-update-toggle]");
-    if (!(toggle instanceof HTMLButtonElement)) return;
-
-    const panel = toggle.closest("[data-update-panel]");
-    if (!(panel instanceof HTMLElement)) return;
-    const timeline = panel.querySelector("[data-update-timeline]");
-    if (!(timeline instanceof HTMLElement)) return;
-
-    const expanded = toggle.getAttribute("aria-expanded") === "true";
-    const next = !expanded;
-    toggle.setAttribute("aria-expanded", next ? "true" : "false");
-    timeline.hidden = !next;
-
-    const label = toggle.querySelector(".post__update-toggle-text");
-    if (label) {
-      const count = timeline.querySelectorAll(".update-timeline__item").length;
-      label.textContent = next
-        ? "Hide earlier updates"
-        : `Show ${count} earlier update${count === 1 ? "" : "s"}`;
-    }
-  });
-
   if (!(feed instanceof HTMLElement) || !(loader instanceof HTMLElement) || !(sentinel instanceof HTMLElement)) {
     return;
   }

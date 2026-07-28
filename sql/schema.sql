@@ -173,3 +173,41 @@ CREATE TABLE IF NOT EXISTS `CS_post_updates` (
   PRIMARY KEY (`id`),
   KEY `idx_cs_post_updates_post_created` (`post_id`, `created_at`, `id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `CS_facebook_posts` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `fb_post_id` VARCHAR(64) NOT NULL,
+  `message` TEXT DEFAULT NULL,
+  `permalink_url` VARCHAR(1024) DEFAULT NULL,
+  `status_type` VARCHAR(64) DEFAULT NULL,
+  `full_picture` VARCHAR(1024) DEFAULT NULL,
+  `fb_created_time` DATETIME DEFAULT NULL,
+  `fb_updated_time` DATETIME DEFAULT NULL,
+  `is_new` TINYINT(1) NOT NULL DEFAULT 1,
+  `cs_post_id` INT UNSIGNED DEFAULT NULL,
+  `first_seen_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `last_synced_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `raw_json` MEDIUMTEXT DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_cs_facebook_posts_fb_post_id` (`fb_post_id`),
+  UNIQUE KEY `uq_cs_facebook_posts_cs_post_id` (`cs_post_id`),
+  KEY `idx_cs_facebook_posts_created` (`fb_created_time`),
+  KEY `idx_cs_facebook_posts_is_new` (`is_new`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `CS_facebook_comments` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `facebook_post_id` INT UNSIGNED NOT NULL,
+  `fb_comment_id` VARCHAR(64) NOT NULL,
+  `message` TEXT DEFAULT NULL,
+  `from_id` VARCHAR(64) DEFAULT NULL,
+  `from_name` VARCHAR(255) DEFAULT NULL,
+  `is_page` TINYINT(1) NOT NULL DEFAULT 0,
+  `fb_created_time` DATETIME DEFAULT NULL,
+  `last_synced_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `raw_json` MEDIUMTEXT DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_cs_facebook_comments_fb_comment_id` (`fb_comment_id`),
+  KEY `idx_cs_facebook_comments_post_created` (`facebook_post_id`, `fb_created_time`),
+  KEY `idx_cs_facebook_comments_post_page` (`facebook_post_id`, `is_page`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
