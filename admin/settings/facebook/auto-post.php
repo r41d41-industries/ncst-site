@@ -7,6 +7,11 @@ auth_require();
 
 $error = null;
 $flash = flash_get('success');
+try {
+    facebook_ensure_auto_post_schema();
+} catch (Throwable) {
+    // Schema ensure is best-effort; page still loads.
+}
 $cron = facebook_cron_settings();
 $autoPost = facebook_auto_post_enabled();
 $form = [

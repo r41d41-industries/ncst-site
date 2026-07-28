@@ -84,6 +84,81 @@ function facebook_auto_post_enabled(): bool
 }
 
 /**
+ * Ensure CS_facebook_comments.applied_at exists (idempotent).
+ * Safe to call from cron/admin; backfills existing Page action comments once.
+ *
+ * @return array{column_added: bool, index_added: bool, backfilled: int}
+ */
+function facebook_ensure_auto_post_schema(): array
+{
+    static $done = null;
+    if (is_array($done)) {
+        return $done;
+    }
+
+    $pdo = db();
+    $table = cs_table('facebook_comments');
+    $columnAdded = false;
+    $indexAdded = false;
+
+    $colStmt = $pdo->prepare(
+        'SELECT 1 FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ? LIMIT 1'
+    );
+    $colStmt->execute([$table, 'applied_at']);
+    if (!(bool) $colStmt->fetchColumn()) {
+        $pdo->exec(
+            "ALTER TABLE `{$table}`
+              ADD COLUMN `applied_at` DATETIME DEFAULT NULL AFTER `last_synced_at`"
+        );
+        $columnAdded = true;
+    }
+
+    $idxStmt = $pdo->prepare(
+        'SELECT 1 FROM information_schema.STATISTICS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ? LIMIT 1'
+    );
+    $idxStmt->execute([$table, 'idx_cs_facebook_comments_applied']);
+    if (!(bool) $idxStmt->fetchColumn()) {
+        $pdo->exec(
+            "ALTER TABLE `{$table}`
+              ADD KEY `idx_cs_facebook_comments_applied` (`facebook_post_id`, `applied_at`)"
+        );
+        $indexAdded = true;
+    }
+
+    $backfilled = 0;
+    // Only backfill when we just added the column (avoid re-scanning every request).
+    if ($columnAdded) {
+        $select = $pdo->query(
+            "SELECT id, message FROM `{$table}`
+             WHERE is_page = 1 AND applied_at IS NULL"
+        );
+        $mark = $pdo->prepare(
+            "UPDATE `{$table}`
+             SET applied_at = COALESCE(fb_created_time, last_synced_at, NOW())
+             WHERE id = ? AND applied_at IS NULL"
+        );
+        if ($select !== false) {
+            while ($row = $select->fetch(PDO::FETCH_ASSOC)) {
+                $type = facebook_comment_action_type(isset($row['message']) ? (string) $row['message'] : null);
+                if ($type === 'update' || $type === 'cleared') {
+                    $mark->execute([(int) $row['id']]);
+                    $backfilled += $mark->rowCount() > 0 ? 1 : 0;
+                }
+            }
+        }
+    }
+
+    $done = [
+        'column_added' => $columnAdded,
+        'index_added' => $indexAdded,
+        'backfilled' => $backfilled,
+    ];
+    return $done;
+}
+
+/**
  * Persist auto-post mode. Turning it on also enables cron and sets frequency to 15m.
  * Frequency remains editable afterward via cron settings.
  *
@@ -1305,6 +1380,7 @@ function facebook_sync_posts(int $limit = 20): array
 function facebook_cron_run(array $options = []): array
 {
     $force = !empty($options['force']);
+    facebook_ensure_auto_post_schema();
     $cron = facebook_cron_settings();
     $autoPost = facebook_auto_post_enabled();
 
