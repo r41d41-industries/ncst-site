@@ -161,8 +161,15 @@ function facebook_ensure_auto_post_schema(): array
 /**
  * Persist auto-post mode. Turning it on also enables cron and sets frequency to 15m.
  * Frequency remains editable afterward via cron settings.
+ * When newly enabling, runs an immediate catch-up sync (10-minute lookback).
  *
- * @return array{auto_post: bool, cron_enabled: bool, frequency: string}
+ * @return array{
+ *   auto_post: bool,
+ *   cron_enabled: bool,
+ *   frequency: string,
+ *   bootstrap: ?array<string, mixed>,
+ *   bootstrap_error: ?string
+ * }
  */
 function facebook_auto_post_set(bool $enabled): array
 {
@@ -170,8 +177,9 @@ function facebook_auto_post_set(bool $enabled): array
     $cron = facebook_cron_settings();
     $frequency = $cron['frequency'];
     $cronEnabled = $cron['enabled'];
+    $newlyEnabled = $enabled && !$wasEnabled;
 
-    if ($enabled && !$wasEnabled) {
+    if ($newlyEnabled) {
         $cronEnabled = true;
         $frequency = '15m';
     }
@@ -182,10 +190,22 @@ function facebook_auto_post_set(bool $enabled): array
         'fb_cron_frequency' => $frequency,
     ]);
 
+    $bootstrap = null;
+    $bootstrapError = null;
+    if ($newlyEnabled) {
+        try {
+            $bootstrap = facebook_auto_post_bootstrap_sync();
+        } catch (Throwable $e) {
+            $bootstrapError = $e->getMessage();
+        }
+    }
+
     return [
         'auto_post' => $enabled,
         'cron_enabled' => $cronEnabled,
         'frequency' => $frequency,
+        'bootstrap' => $bootstrap,
+        'bootstrap_error' => $bootstrapError,
     ];
 }
 
@@ -195,6 +215,7 @@ function facebook_auto_post_set(bool $enabled): array
 function facebook_cron_interval_seconds(string $frequency): int
 {
     return match ($frequency) {
+        '5m' => 5 * 60,
         '15m' => 15 * 60,
         '6h' => 6 * 3600,
         'daily' => 24 * 3600,
@@ -625,6 +646,63 @@ function facebook_auto_convert_new_posts(array $fbRowIds): array
 }
 
 /**
+ * Auto-convert unconverted Facebook rows whose fb_created_time falls within the
+ * last $minutes (Eastern). Skips posts without a mapped hashtag. Always publishes.
+ *
+ * @return array{converted: int, skipped: int, errors: int, post_ids: list<int>, candidates: int}
+ */
+function facebook_auto_convert_recent_posts(int $minutes = 10): array
+{
+    $minutes = max(1, $minutes);
+    $tz = facebook_timezone();
+    $cutoff = (new DateTimeImmutable('now', $tz))->modify('-' . $minutes . ' minutes')->format('Y-m-d H:i:s');
+
+    $table = cs_table('facebook_posts');
+    $stmt = db()->prepare(
+        "SELECT id FROM `{$table}`
+         WHERE cs_post_id IS NULL
+           AND message IS NOT NULL AND TRIM(message) <> ''
+           AND fb_created_time IS NOT NULL
+           AND fb_created_time >= ?
+         ORDER BY fb_created_time ASC, id ASC"
+    );
+    $stmt->execute([$cutoff]);
+    $ids = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+
+    $result = facebook_auto_convert_new_posts($ids);
+    $result['candidates'] = count($ids);
+    return $result;
+}
+
+/**
+ * Immediate catch-up sync when auto-post is turned on:
+ * sync posts, convert qualifying posts from the last 10 minutes, apply comments, refresh bodies.
+ *
+ * @return array<string, mixed>
+ */
+function facebook_auto_post_bootstrap_sync(): array
+{
+    facebook_ensure_auto_post_schema();
+
+    $sync = facebook_sync_posts(20);
+    $autoConvert = facebook_auto_convert_recent_posts(10);
+    $commentsAfter = facebook_sync_comments_for_converted_posts();
+    $applyComments = facebook_apply_unapplied_comments_for_converted_posts();
+    $bodyRefresh = facebook_refresh_bodies_within_hours(6);
+    facebook_cron_mark_ran();
+
+    return [
+        'ok' => true,
+        'sync' => $sync,
+        'auto_convert' => $autoConvert,
+        'comments_after_convert' => $commentsAfter,
+        'apply_comments' => $applyComments,
+        'body_refresh' => $bodyRefresh,
+        'last_run' => settings_get('fb_cron_last_run'),
+    ];
+}
+
+/**
  * @return array<string, mixed>|null
  */
 function facebook_post_find(int $id): ?array
@@ -1048,6 +1126,7 @@ function facebook_sync_comments_for_converted_posts(): array
 function facebook_cron_frequencies(): array
 {
     return [
+        '5m' => 'Every 5 minutes',
         '15m' => 'Every 15 minutes',
         'hourly' => 'Hourly',
         '6h' => 'Every 6 hours',

@@ -25,14 +25,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $enabled = isset($_POST['fb_auto_post_mode']) && (string) $_POST['fb_auto_post_mode'] === '1';
         $form['fb_auto_post_mode'] = $enabled ? '1' : '0';
         try {
+            $wasEnabled = $autoPost;
             $saved = facebook_auto_post_set($enabled);
             $cron = facebook_cron_settings();
             $autoPost = $saved['auto_post'];
-            if ($enabled) {
-                flash_set(
-                    'success',
-                    'Auto-post mode enabled. Cron is on and set to every 15 minutes (frequency remains editable under Cron).'
-                );
+            if ($enabled && !$wasEnabled) {
+                $freqLabel = facebook_cron_frequencies()[$saved['frequency']] ?? $saved['frequency'];
+                $msg = 'Auto-post mode enabled. Cron is on and set to ' . $freqLabel
+                    . ' (editable under Cron, including Every 5 minutes).';
+                if ($saved['bootstrap_error'] !== null) {
+                    $msg .= ' Catch-up sync failed: ' . $saved['bootstrap_error'];
+                } elseif (is_array($saved['bootstrap'])) {
+                    $converted = (int) ($saved['bootstrap']['auto_convert']['converted'] ?? 0);
+                    $msg .= ' Catch-up sync ran for the prior 10 minutes'
+                        . ($converted === 1 ? ' (1 post converted).' : ' (' . $converted . ' posts converted).');
+                }
+                flash_set('success', $msg);
+            } elseif ($enabled) {
+                flash_set('success', 'Auto-post settings saved.');
             } else {
                 flash_set('success', 'Auto-post mode disabled. Scheduled sync settings were left unchanged.');
             }
@@ -75,7 +85,7 @@ require dirname(__DIR__, 3) . '/includes/partials/admin_shell_start.php';
                 <input type="checkbox" name="fb_auto_post_mode" value="1"<?= $form['fb_auto_post_mode'] === '1' ? ' checked' : '' ?>>
                 Enable Facebook Sync auto-post mode
               </label>
-              <p class="tu-help">Turning this on also enables scheduled sync and sets frequency to every 15 minutes. You can change frequency later on the Cron page. Manual Sync Now does not run auto-post actions.</p>
+              <p class="tu-help">Turning this on enables scheduled sync, sets frequency to every 15 minutes (change later on the Cron page — including every 5 minutes), and immediately runs a catch-up sync for qualifying posts from the prior 10 minutes. Manual Sync Now does not run auto-post actions.</p>
             </div>
             <div class="tu-form-row">
               <span class="tu-label">Current schedule</span>
@@ -93,6 +103,12 @@ require dirname(__DIR__, 3) . '/includes/partials/admin_shell_start.php';
                 <li>Syncs comments for converted posts and applies new Page UPDATE / CLEARED comments</li>
                 <li>Updates body text when the Facebook message changed and <code>fb_created_time</code> is within 6 hours</li>
               </ul>
+            </div>
+            <div class="tu-form-row">
+              <span class="tu-label">On enable</span>
+              <p class="tu-help" style="margin:0;">
+                Immediately syncs Facebook and auto-converts unconverted posts with a mapped hashtag whose <code>fb_created_time</code> is within the prior 10 minutes, then applies comments and refreshes recent bodies.
+              </p>
             </div>
             <div class="tu-form-row">
               <span class="tu-label">Cron endpoint</span>
