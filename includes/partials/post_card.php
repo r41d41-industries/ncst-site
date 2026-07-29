@@ -61,8 +61,12 @@ if ($isIncident) {
 }
 
 $articleClass = 'post post--' . $layout;
+$isSticky = !empty($post['is_sticky']);
+if ($isSticky) {
+    $articleClass .= ' post--sticky';
+}
 ?>
-<article class="<?= e($articleClass) ?>" id="<?= e($anchor) ?>" style="animation-delay: <?= e((string) min($i * 0.06, 0.36)) ?>s" data-category="<?= e($category) ?>" data-layout="<?= e($layout) ?>">
+<article class="<?= e($articleClass) ?>" id="<?= e($anchor) ?>" style="animation-delay: <?= e((string) min($i * 0.06, 0.36)) ?>s" data-category="<?= e($category) ?>" data-layout="<?= e($layout) ?>"<?= $isSticky ? ' data-sticky="1"' : '' ?>>
   <?php if ($hasImage): ?>
     <div class="post__media">
       <img src="/<?= e(ltrim((string) $post['image_path'], '/')) ?>" alt="" width="800" height="256">
@@ -72,6 +76,9 @@ $articleClass = 'post post--' . $layout;
     <div class="post__meta">
       <div class="post__meta-left">
         <span class="badge <?= e($badgeClass) ?>" style="--cat-color: <?= e($catColor) ?>"><?= e($badgeLabel) ?></span>
+        <?php if ($isSticky): ?>
+          <span class="post__sticky-label">Sticky</span>
+        <?php endif; ?>
       </div>
       <time class="post__time" datetime="<?= e((string) $post['created_at']) ?>"><?= e(cs_format_post_time((string) $post['created_at'])) ?></time>
     </div>

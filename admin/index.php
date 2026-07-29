@@ -228,11 +228,13 @@ if ($adminStatusFilter === 'draft') {
                     <?php
                     $trashed = posts_is_trashed($post);
                     $statusLabel = $trashed ? 'trash' : (!empty($post['published']) ? 'published' : 'draft');
+                    $isSticky = !empty($post['is_sticky']);
                     $searchBlob = implode(' ', [
                         (string) $post['id'],
                         (string) $post['title'],
                         (string) $post['category'],
                         $statusLabel,
+                        $isSticky ? 'sticky' : '',
                         (string) $post['updated_at'],
                     ]);
                     ?>
@@ -248,7 +250,12 @@ if ($adminStatusFilter === 'draft') {
                         >
                       </td>
                       <td data-sort-value="<?= e((string) $post['id']) ?>"><?= e((string) $post['id']) ?></td>
-                      <th scope="row"><?= e((string) $post['title']) ?></th>
+                      <th scope="row">
+                        <?= e((string) $post['title']) ?>
+                        <?php if ($isSticky): ?>
+                          <span class="tu-badge tu-badge--warning" style="margin-left:0.35rem;">Sticky</span>
+                        <?php endif; ?>
+                      </th>
                       <td><?= e((string) $post['category']) ?></td>
                       <td data-sort-value="<?= e($statusLabel) ?>">
                         <?php if ($trashed): ?>

@@ -135,7 +135,7 @@ function posts_list_published(?string $category = null, ?int $limit = null, int 
         $params[] = strtoupper($category);
     }
 
-    $sql .= ' ORDER BY created_at DESC, id DESC';
+    $sql .= ' ORDER BY is_sticky DESC, created_at DESC, id DESC';
     if ($limit !== null) {
         $sql .= ' LIMIT ' . max(0, $limit) . ' OFFSET ' . max(0, $offset);
     }
@@ -419,6 +419,7 @@ function posts_create(array $data): int
         'agency', 'dispatched_at', 'cleared_at', 'recorded_at', 'expires_at', 'dispatched_text', 'status_text',
         'image_path', 'image_media_id', 'facebook_url', 'x_url', 'read_more_url',
         'og_title', 'og_description', 'og_image_path', 'og_image_media_id', 'gallery_id', 'playlist_id', 'published',
+        'is_sticky',
     ];
     $params = [
         ':category' => $data['category'],
@@ -447,6 +448,7 @@ function posts_create(array $data): int
         ':gallery_id' => $data['gallery_id'] ?? null,
         ':playlist_id' => $data['playlist_id'] ?? null,
         ':published' => !empty($data['published']) ? 1 : 0,
+        ':is_sticky' => !empty($data['is_sticky']) ? 1 : 0,
     ];
 
     $footnotes = $data['footnotes'] ?? null;
@@ -504,6 +506,7 @@ function posts_update(int $id, array $data): void
         gallery_id = :gallery_id,
         playlist_id = :playlist_id,
         published = :published,
+        is_sticky = :is_sticky,
         updated_at = CURRENT_TIMESTAMP
     WHERE id = :id";
     $stmt = db()->prepare($sql);
@@ -537,6 +540,7 @@ function posts_update(int $id, array $data): void
         ':gallery_id' => $data['gallery_id'] ?? null,
         ':playlist_id' => $data['playlist_id'] ?? null,
         ':published' => !empty($data['published']) ? 1 : 0,
+        ':is_sticky' => !empty($data['is_sticky']) ? 1 : 0,
     ]);
 }
 
