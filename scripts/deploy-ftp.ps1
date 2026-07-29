@@ -46,13 +46,16 @@ Write-Host "Password: (set, not shown)"
 $files = @(
   'admin/settings/facebook/auto-post.php',
   'admin/settings/facebook/cron.php',
+  'admin/settings/facebook/sync-log.php',
   'cron/facebook_sync.php',
   'includes/facebook.php',
   'includes/partials/admin_shell_start.php',
   'sql/apply_facebook_auto_post.php',
   'sql/apply_facebook_comments.php',
+  'sql/apply_facebook_sync_logs.php',
   'sql/migrate_facebook_auto_post.sql',
   'sql/migrate_facebook_comments.sql',
+  'sql/migrate_facebook_sync_logs.sql',
   'sql/schema.sql',
   '.env.example',
   'README.md'

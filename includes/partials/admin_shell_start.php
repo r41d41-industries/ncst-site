@@ -434,9 +434,10 @@ $panelSearchLabel = $adminSection === 'posts' ? 'Filter posts' : 'Filter ' . $ad
                 $isFbCredentialsActive = $adminSettingsPage === 'facebook-credentials';
                 $isFbCronActive = $adminSettingsPage === 'facebook-cron';
                 $isFbAutoPostActive = $adminSettingsPage === 'facebook-auto-post';
+                $isFbSyncLogActive = $adminSettingsPage === 'facebook-sync-log';
                 $isFbImportActive = $adminSettingsPage === 'facebook-import';
                 $isFbHashtagsActive = $adminSettingsPage === 'facebook-hashtags';
-                $settingsFacebookSubOpen = $isFbCredentialsActive || $isFbCronActive || $isFbAutoPostActive || $isFbImportActive || $isFbHashtagsActive;
+                $settingsFacebookSubOpen = $isFbCredentialsActive || $isFbCronActive || $isFbAutoPostActive || $isFbSyncLogActive || $isFbImportActive || $isFbHashtagsActive;
               ?>
               <ul class="admin-panel__nav" aria-label="Settings">
                 <li>
@@ -530,6 +531,13 @@ $panelSearchLabel = $adminSection === 'posts' ? 'Filter posts' : 'Filter ' . $ad
                         href="/admin/settings/facebook/auto-post.php"
                         <?= $isFbAutoPostActive ? 'aria-current="page"' : '' ?>
                       >Auto-post</a>
+                    </li>
+                    <li>
+                      <a
+                        class="admin-panel__link<?= $isFbSyncLogActive ? ' is-active' : '' ?>"
+                        href="/admin/settings/facebook/sync-log.php"
+                        <?= $isFbSyncLogActive ? 'aria-current="page"' : '' ?>
+                      >Sync log</a>
                     </li>
                     <li>
                       <a
