@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "source": "workspace-visual-schema",
+  "name": "Newnan Coweta Scanner Traffic",
+  "slug": "untitled-project-2",
+  "project": {
+    "name": "Newnan Coweta Scanner Traffic",
+    "logoUrl": null
+  },
+  "importSource": {
+    "type": "manual",
+    "importedAt": "2026-07-26T23:57:19.876Z",
+    "sourceName": "TypeUI design skill: Shadcn"
+  },
+  "components": [
+    "color",
+    "typography",
+    "layout",
+    "radius",
+    "shadow",
+    "borders",
+    "button",
+    "button-group",
+    "card",
+    "input",
+    "alert",
+    "badge",
+    "list",
+    "avatar",
+    "icon-shape",
+    "accordion",
+    "dropdown",
+    "modal",
+    "tabs",
+    "table",
+    "pagination",
+    "sidebar",
+    "radio",
+    "checkbox",
+    "toggle",
+    "tooltip",
+    "popovers",
+    "content"
+  ]
+}
