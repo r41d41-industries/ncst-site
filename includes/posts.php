@@ -13,6 +13,56 @@ function posts_updates_table(): string
 }
 
 /**
+ * Idempotent sticky-column migrate (safe on every request; runs once per process).
+ *
+ * @return array{column_added: bool, index_added: bool}
+ */
+function posts_ensure_sticky_schema(): array
+{
+    static $done = null;
+    if (is_array($done)) {
+        return $done;
+    }
+
+    $pdo = db();
+    $table = posts_table();
+    $columnAdded = false;
+    $indexAdded = false;
+
+    $colStmt = $pdo->prepare(
+        'SELECT 1 FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ? LIMIT 1'
+    );
+    $colStmt->execute([$table, 'is_sticky']);
+    if (!(bool) $colStmt->fetchColumn()) {
+        $pdo->exec(
+            "ALTER TABLE `{$table}`
+              ADD COLUMN `is_sticky` TINYINT(1) NOT NULL DEFAULT 0 AFTER `published`"
+        );
+        $columnAdded = true;
+    }
+
+    $idxStmt = $pdo->prepare(
+        'SELECT 1 FROM information_schema.STATISTICS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ? LIMIT 1'
+    );
+    $idxStmt->execute([$table, 'idx_cs_posts_published_sticky_created']);
+    if (!(bool) $idxStmt->fetchColumn()) {
+        $pdo->exec(
+            "ALTER TABLE `{$table}`
+              ADD KEY `idx_cs_posts_published_sticky_created` (`published`, `is_sticky`, `created_at`)"
+        );
+        $indexAdded = true;
+    }
+
+    $done = [
+        'column_added' => $columnAdded,
+        'index_added' => $indexAdded,
+    ];
+    return $done;
+}
+
+/**
  * @param list<int> $postIds
  * @return array<int, list<array<string, mixed>>>
  */
@@ -126,6 +176,8 @@ function posts_delete_update(int $updateId, int $postId): void
  */
 function posts_list_published(?string $category = null, ?int $limit = null, int $offset = 0): array
 {
+    posts_ensure_sticky_schema();
+
     $table = posts_table();
     $sql = "SELECT * FROM `{$table}` WHERE published = 1 AND trashed_at IS NULL";
     $params = [];
@@ -186,6 +238,8 @@ function posts_matches_admin_type(array $post, string $type): bool
  */
 function posts_list_all(?string $category = null, ?string $status = null, ?string $type = null): array
 {
+    posts_ensure_sticky_schema();
+
     $table = posts_table();
     $sql = "SELECT * FROM `{$table}` WHERE 1=1";
     $params = [];
@@ -408,6 +462,8 @@ function posts_find(int $id): ?array
  */
 function posts_create(array $data): int
 {
+    posts_ensure_sticky_schema();
+
     $table = posts_table();
     $createdAt = isset($data['created_at']) ? trim((string) $data['created_at']) : '';
     $updatedAt = isset($data['updated_at']) ? trim((string) $data['updated_at']) : '';
@@ -478,6 +534,8 @@ function posts_create(array $data): int
  */
 function posts_update(int $id, array $data): void
 {
+    posts_ensure_sticky_schema();
+
     $table = posts_table();
     $sql = "UPDATE `{$table}` SET
         category = :category,

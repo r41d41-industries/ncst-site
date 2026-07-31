@@ -44,18 +44,27 @@ Write-Host "Remote root: $remoteRoot"
 Write-Host "Password: (set, not shown)"
 
 $files = @(
+  'admin/facebook/posts.php',
+  'admin/index.php',
+  'admin/post_article.php',
+  'admin/post_incident.php',
   'admin/settings/facebook/auto-post.php',
   'admin/settings/facebook/cron.php',
   'admin/settings/facebook/sync-log.php',
+  'assets/css/main.css',
   'cron/facebook_sync.php',
   'includes/facebook.php',
   'includes/partials/admin_shell_start.php',
+  'includes/partials/post_card.php',
+  'includes/posts.php',
   'sql/apply_facebook_auto_post.php',
   'sql/apply_facebook_comments.php',
   'sql/apply_facebook_sync_logs.php',
+  'sql/apply_posts_sticky.php',
   'sql/migrate_facebook_auto_post.sql',
   'sql/migrate_facebook_comments.sql',
   'sql/migrate_facebook_sync_logs.sql',
+  'sql/migrate_posts_sticky.sql',
   'sql/schema.sql',
   '.env.example',
   'README.md'
@@ -63,8 +72,11 @@ $files = @(
 
 $dirs = @(
   'admin',
+  'admin/facebook',
   'admin/settings',
   'admin/settings/facebook',
+  'assets',
+  'assets/css',
   'cron',
   'includes',
   'includes/partials',
@@ -112,5 +124,6 @@ foreach ($rel in $files) {
 }
 
 Write-Host 'Deploy complete.'
+Write-Host 'Sticky schema auto-ensures on feed/admin post loads.'
 Write-Host 'If needed, run on production: php sql/apply_facebook_auto_post.php'
 Write-Host '(Schema is also auto-ensured on cron/auto-post admin load.)'
