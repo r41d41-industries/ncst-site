@@ -77,6 +77,433 @@ function facebook_cron_settings(): array
     ];
 }
 
+/** Whether Facebook Sync auto-post mode is on. */
+function facebook_auto_post_enabled(): bool
+{
+    return settings_get('fb_auto_post_mode', '0') === '1';
+}
+
+/**
+ * Ensure CS_facebook_comments.applied_at exists (idempotent).
+ * Safe to call from cron/admin; backfills existing Page action comments once.
+ *
+ * @return array{column_added: bool, index_added: bool, backfilled: int}
+ */
+function facebook_ensure_auto_post_schema(): array
+{
+    static $done = null;
+    if (is_array($done)) {
+        return $done;
+    }
+
+    $pdo = db();
+    $table = cs_table('facebook_comments');
+    $columnAdded = false;
+    $indexAdded = false;
+
+    $colStmt = $pdo->prepare(
+        'SELECT 1 FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ? LIMIT 1'
+    );
+    $colStmt->execute([$table, 'applied_at']);
+    if (!(bool) $colStmt->fetchColumn()) {
+        $pdo->exec(
+            "ALTER TABLE `{$table}`
+              ADD COLUMN `applied_at` DATETIME DEFAULT NULL AFTER `last_synced_at`"
+        );
+        $columnAdded = true;
+    }
+
+    $idxStmt = $pdo->prepare(
+        'SELECT 1 FROM information_schema.STATISTICS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ? LIMIT 1'
+    );
+    $idxStmt->execute([$table, 'idx_cs_facebook_comments_applied']);
+    if (!(bool) $idxStmt->fetchColumn()) {
+        $pdo->exec(
+            "ALTER TABLE `{$table}`
+              ADD KEY `idx_cs_facebook_comments_applied` (`facebook_post_id`, `applied_at`)"
+        );
+        $indexAdded = true;
+    }
+
+    $backfilled = 0;
+    // Only backfill when we just added the column (avoid re-scanning every request).
+    if ($columnAdded) {
+        $select = $pdo->query(
+            "SELECT id, message FROM `{$table}`
+             WHERE is_page = 1 AND applied_at IS NULL"
+        );
+        $mark = $pdo->prepare(
+            "UPDATE `{$table}`
+             SET applied_at = COALESCE(fb_created_time, last_synced_at, NOW())
+             WHERE id = ? AND applied_at IS NULL"
+        );
+        if ($select !== false) {
+            while ($row = $select->fetch(PDO::FETCH_ASSOC)) {
+                $type = facebook_comment_action_type(isset($row['message']) ? (string) $row['message'] : null);
+                if ($type === 'update' || $type === 'cleared') {
+                    $mark->execute([(int) $row['id']]);
+                    $backfilled += $mark->rowCount() > 0 ? 1 : 0;
+                }
+            }
+        }
+    }
+
+    $done = [
+        'column_added' => $columnAdded,
+        'index_added' => $indexAdded,
+        'backfilled' => $backfilled,
+    ];
+    return $done;
+}
+
+/**
+ * Ensure CS_facebook_sync_logs exists (idempotent).
+ *
+ * @return array{created: bool}
+ */
+function facebook_ensure_sync_logs_schema(): array
+{
+    static $done = null;
+    if (is_array($done)) {
+        return $done;
+    }
+
+    $pdo = db();
+    $table = cs_table('facebook_sync_logs');
+    $stmt = $pdo->prepare(
+        'SELECT 1 FROM information_schema.TABLES
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? LIMIT 1'
+    );
+    $stmt->execute([$table]);
+    $created = false;
+    if (!(bool) $stmt->fetchColumn()) {
+        $pdo->exec(
+            "CREATE TABLE `{$table}` (
+              `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+              `ran_at` DATETIME NOT NULL,
+              `source` VARCHAR(16) NOT NULL,
+              `posts_created` INT UNSIGNED NOT NULL DEFAULT 0,
+              `posts_updated` INT UNSIGNED NOT NULL DEFAULT 0,
+              `comments_new` INT UNSIGNED NOT NULL DEFAULT 0,
+              `triggers_processed` INT UNSIGNED NOT NULL DEFAULT 0,
+              `failures` INT UNSIGNED NOT NULL DEFAULT 0,
+              `ok` TINYINT(1) NOT NULL DEFAULT 1,
+              `error_message` TEXT DEFAULT NULL,
+              `details_json` MEDIUMTEXT DEFAULT NULL,
+              PRIMARY KEY (`id`),
+              KEY `idx_cs_facebook_sync_logs_ran_at` (`ran_at`),
+              KEY `idx_cs_facebook_sync_logs_source` (`source`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        );
+        $created = true;
+    }
+
+    $done = ['created' => $created];
+    return $done;
+}
+
+/**
+ * Allowed sync log source labels.
+ *
+ * @return array<string, string>
+ */
+function facebook_sync_log_sources(): array
+{
+    return [
+        'manual' => 'Manual',
+        'cron' => 'Cron',
+        'auto-post' => 'Auto-post',
+    ];
+}
+
+/**
+ * Persist a sync run log row. Never throws (logging must not break sync).
+ *
+ * @param array{
+ *   source: string,
+ *   posts_created?: int,
+ *   posts_updated?: int,
+ *   comments_new?: int,
+ *   triggers_processed?: int,
+ *   failures?: int,
+ *   ok?: bool,
+ *   error_message?: ?string,
+ *   details?: mixed,
+ *   ran_at?: ?string
+ * } $data
+ */
+function facebook_sync_log_write(array $data): void
+{
+    try {
+        facebook_ensure_sync_logs_schema();
+
+        $sources = facebook_sync_log_sources();
+        $source = (string) ($data['source'] ?? '');
+        if (!isset($sources[$source])) {
+            $source = 'manual';
+        }
+
+        $ranAt = trim((string) ($data['ran_at'] ?? ''));
+        if ($ranAt === '') {
+            $ranAt = (new DateTimeImmutable('now', facebook_timezone()))->format('Y-m-d H:i:s');
+        }
+
+        $detailsJson = null;
+        if (array_key_exists('details', $data) && $data['details'] !== null) {
+            $encoded = json_encode($data['details'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            if ($encoded !== false) {
+                if (strlen($encoded) > 60000) {
+                    $encoded = substr($encoded, 0, 60000);
+                }
+                $detailsJson = $encoded;
+            }
+        }
+
+        $errorMessage = isset($data['error_message']) ? trim((string) $data['error_message']) : '';
+        if ($errorMessage === '') {
+            $errorMessage = null;
+        } elseif (strlen($errorMessage) > 2000) {
+            $errorMessage = substr($errorMessage, 0, 1999) . '…';
+        }
+
+        $table = cs_table('facebook_sync_logs');
+        $stmt = db()->prepare(
+            "INSERT INTO `{$table}`
+              (ran_at, source, posts_created, posts_updated, comments_new, triggers_processed, failures, ok, error_message, details_json)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        );
+        $stmt->execute([
+            $ranAt,
+            $source,
+            max(0, (int) ($data['posts_created'] ?? 0)),
+            max(0, (int) ($data['posts_updated'] ?? 0)),
+            max(0, (int) ($data['comments_new'] ?? 0)),
+            max(0, (int) ($data['triggers_processed'] ?? 0)),
+            max(0, (int) ($data['failures'] ?? 0)),
+            !empty($data['ok']) ? 1 : 0,
+            $errorMessage,
+            $detailsJson,
+        ]);
+    } catch (Throwable) {
+        // Logging must never break sync.
+    }
+}
+
+/**
+ * Paginated sync logs, newest first.
+ *
+ * @return array{
+ *   rows: list<array<string, mixed>>,
+ *   total: int,
+ *   page: int,
+ *   per_page: int,
+ *   pages: int
+ * }
+ */
+function facebook_sync_logs_list(int $page = 1, int $perPage = 25): array
+{
+    facebook_ensure_sync_logs_schema();
+
+    $perPage = max(1, min(100, $perPage));
+    $page = max(1, $page);
+    $table = cs_table('facebook_sync_logs');
+
+    $total = (int) db()->query("SELECT COUNT(*) FROM `{$table}`")->fetchColumn();
+    $pages = max(1, (int) ceil($total / $perPage));
+    if ($page > $pages) {
+        $page = $pages;
+    }
+    $offset = ($page - 1) * $perPage;
+
+    $stmt = db()->prepare(
+        "SELECT * FROM `{$table}`
+         ORDER BY ran_at DESC, id DESC
+         LIMIT {$perPage} OFFSET {$offset}"
+    );
+    $stmt->execute();
+    $rows = $stmt->fetchAll();
+
+    return [
+        'rows' => $rows,
+        'total' => $total,
+        'page' => $page,
+        'per_page' => $perPage,
+        'pages' => $pages,
+    ];
+}
+
+/**
+ * Build a sync-log payload from facebook_sync_posts() + optional auto-post extras.
+ *
+ * @param array<string, mixed> $sync
+ * @param array<string, mixed>|null $autoConvert
+ * @param array<string, mixed>|null $applyComments
+ * @param array<string, mixed>|null $bodyRefresh
+ * @param array<string, mixed>|null $commentsAfterConvert
+ * @return array<string, mixed>
+ */
+function facebook_sync_log_from_results(
+    string $source,
+    array $sync,
+    ?array $autoConvert = null,
+    ?array $applyComments = null,
+    ?array $bodyRefresh = null,
+    ?array $commentsAfterConvert = null,
+    bool $ok = true,
+    ?string $errorMessage = null
+): array {
+    $commentsNew = (int) ($sync['comments_inserted'] ?? 0);
+    if (is_array($commentsAfterConvert)) {
+        $commentsNew += (int) ($commentsAfterConvert['inserted'] ?? 0);
+    }
+
+    $triggers = 0;
+    if (is_array($applyComments)) {
+        $triggers = (int) ($applyComments['updates'] ?? 0) + (int) ($applyComments['cleared'] ?? 0);
+    }
+
+    $failures = (int) ($sync['comments_errors'] ?? 0);
+    if (is_array($autoConvert)) {
+        $failures += (int) ($autoConvert['errors'] ?? 0);
+    }
+    if (is_array($applyComments)) {
+        $failures += (int) ($applyComments['errors'] ?? 0);
+    }
+    if (is_array($bodyRefresh)) {
+        $failures += (int) ($bodyRefresh['errors'] ?? 0);
+    }
+    if (is_array($commentsAfterConvert)) {
+        $failures += (int) ($commentsAfterConvert['errors'] ?? 0);
+    }
+    if (!$ok && $failures === 0) {
+        $failures = 1;
+    }
+
+    return [
+        'source' => $source,
+        'posts_created' => (int) ($sync['inserted'] ?? 0),
+        'posts_updated' => (int) ($sync['updated'] ?? 0),
+        'comments_new' => $commentsNew,
+        'triggers_processed' => $triggers,
+        'failures' => $failures,
+        'ok' => $ok,
+        'error_message' => $errorMessage,
+        'details' => [
+            'sync' => [
+                'fetched' => (int) ($sync['fetched'] ?? 0),
+                'comments_fetched' => (int) ($sync['comments_fetched'] ?? 0),
+                'comments_updated' => (int) ($sync['comments_updated'] ?? 0),
+            ],
+            'auto_convert' => $autoConvert,
+            'apply_comments' => $applyComments,
+            'body_refresh' => $bodyRefresh,
+        ],
+    ];
+}
+
+/**
+ * Persist auto-post mode. Turning it on also enables cron and sets frequency to 15m.
+ * Frequency remains editable afterward via cron settings.
+ * When newly enabling, runs an immediate catch-up sync (10-minute lookback).
+ *
+ * @return array{
+ *   auto_post: bool,
+ *   cron_enabled: bool,
+ *   frequency: string,
+ *   bootstrap: ?array<string, mixed>,
+ *   bootstrap_error: ?string
+ * }
+ */
+function facebook_auto_post_set(bool $enabled): array
+{
+    $wasEnabled = facebook_auto_post_enabled();
+    $cron = facebook_cron_settings();
+    $frequency = $cron['frequency'];
+    $cronEnabled = $cron['enabled'];
+    $newlyEnabled = $enabled && !$wasEnabled;
+
+    if ($newlyEnabled) {
+        $cronEnabled = true;
+        $frequency = '15m';
+    }
+
+    settings_set_many([
+        'fb_auto_post_mode' => $enabled ? '1' : '0',
+        'fb_cron_enabled' => $cronEnabled ? '1' : '0',
+        'fb_cron_frequency' => $frequency,
+    ]);
+
+    $bootstrap = null;
+    $bootstrapError = null;
+    if ($newlyEnabled) {
+        try {
+            $bootstrap = facebook_auto_post_bootstrap_sync();
+        } catch (Throwable $e) {
+            $bootstrapError = $e->getMessage();
+        }
+    }
+
+    return [
+        'auto_post' => $enabled,
+        'cron_enabled' => $cronEnabled,
+        'frequency' => $frequency,
+        'bootstrap' => $bootstrap,
+        'bootstrap_error' => $bootstrapError,
+    ];
+}
+
+/**
+ * Interval seconds for a cron frequency key.
+ */
+function facebook_cron_interval_seconds(string $frequency): int
+{
+    return match ($frequency) {
+        '5m' => 5 * 60,
+        '15m' => 15 * 60,
+        '6h' => 6 * 3600,
+        'daily' => 24 * 3600,
+        default => 3600,
+    };
+}
+
+/**
+ * Whether a scheduled run should execute now (cron enabled and interval elapsed).
+ */
+function facebook_cron_is_due(): bool
+{
+    $cron = facebook_cron_settings();
+    if (!$cron['enabled']) {
+        return false;
+    }
+    if ($cron['last_run'] === null) {
+        return true;
+    }
+    try {
+        $last = new DateTimeImmutable($cron['last_run'], facebook_timezone());
+    } catch (Throwable) {
+        return true;
+    }
+    $now = new DateTimeImmutable('now', facebook_timezone());
+    $elapsed = $now->getTimestamp() - $last->getTimestamp();
+    return $elapsed >= facebook_cron_interval_seconds($cron['frequency']);
+}
+
+function facebook_cron_mark_ran(?DateTimeImmutable $when = null): void
+{
+    $when ??= new DateTimeImmutable('now', facebook_timezone());
+    settings_set('fb_cron_last_run', $when->setTimezone(facebook_timezone())->format('Y-m-d H:i:s'));
+}
+
+/**
+ * Shared secret for the Facebook cron CLI/HTTP endpoint (env CRON_SECRET).
+ */
+function facebook_cron_secret(): string
+{
+    return trim((string) (getenv('CRON_SECRET') ?: ''));
+}
+
 /**
  * How converted Facebook posts are saved to the feed.
  *
@@ -319,9 +746,10 @@ function facebook_convert_category_options(): array
 /**
  * Convert a synced Facebook row into a CMS feed post.
  *
+ * @param array{force_published?: bool, apply_comments?: bool} $options
  * @throws RuntimeException|InvalidArgumentException
  */
-function facebook_convert_to_post(int $fbRowId, string $category): int
+function facebook_convert_to_post(int $fbRowId, string $category, array $options = []): int
 {
     $row = facebook_post_find($fbRowId);
     if ($row === null) {
@@ -341,11 +769,15 @@ function facebook_convert_to_post(int $fbRowId, string $category): int
         throw new InvalidArgumentException('Choose a valid category.');
     }
 
+    $forcePublished = !empty($options['force_published']);
     $permalink = trim((string) ($row['permalink_url'] ?? ''));
     $facebookUrl = $permalink !== '' ? cs_normalize_url($permalink) : null;
     $fbTime = !empty($row['fb_created_time']) ? (string) $row['fb_created_time'] : null;
     $importStatus = facebook_import_status();
-    $published = facebook_import_publishes() ? 1 : 0;
+    $published = ($forcePublished || facebook_import_publishes()) ? 1 : 0;
+    $applyComments = array_key_exists('apply_comments', $options)
+        ? (bool) $options['apply_comments']
+        : ($importStatus === 'published_with_comments');
     $parsed = facebook_message_to_title_body($message, $fbTime);
     $title = $parsed['title'];
     $body = $parsed['body'];
@@ -397,7 +829,7 @@ function facebook_convert_to_post(int $fbRowId, string $category): int
         // Comments can sync on the next Sync Now; conversion still succeeded.
     }
 
-    if ($importStatus === 'published_with_comments') {
+    if ($applyComments) {
         try {
             facebook_apply_page_comments_to_post($postId);
         } catch (Throwable) {
@@ -406,6 +838,141 @@ function facebook_convert_to_post(int $fbRowId, string $category): int
     }
 
     return $postId;
+}
+
+/**
+ * Auto-convert newly synced Facebook rows that have a mapped hashtag topic.
+ * Skips posts without a matching hashtag. Always publishes.
+ *
+ * @param list<int> $fbRowIds
+ * @return array{converted: int, skipped: int, errors: int, post_ids: list<int>}
+ */
+function facebook_auto_convert_new_posts(array $fbRowIds): array
+{
+    $converted = 0;
+    $skipped = 0;
+    $errors = 0;
+    $postIds = [];
+
+    foreach ($fbRowIds as $fbRowId) {
+        $fbRowId = (int) $fbRowId;
+        if ($fbRowId <= 0) {
+            $skipped++;
+            continue;
+        }
+        $row = facebook_post_find($fbRowId);
+        if ($row === null || !empty($row['cs_post_id'])) {
+            $skipped++;
+            continue;
+        }
+        $message = trim((string) ($row['message'] ?? ''));
+        $category = facebook_suggest_category($message);
+        if ($category === null) {
+            $skipped++;
+            continue;
+        }
+        try {
+            $postIds[] = facebook_convert_to_post($fbRowId, $category, [
+                'force_published' => true,
+                'apply_comments' => false,
+            ]);
+            $converted++;
+        } catch (Throwable) {
+            $errors++;
+        }
+    }
+
+    return [
+        'converted' => $converted,
+        'skipped' => $skipped,
+        'errors' => $errors,
+        'post_ids' => $postIds,
+    ];
+}
+
+/**
+ * Auto-convert unconverted Facebook rows whose fb_created_time falls within the
+ * last $minutes (Eastern). Skips posts without a mapped hashtag. Always publishes.
+ *
+ * @return array{converted: int, skipped: int, errors: int, post_ids: list<int>, candidates: int}
+ */
+function facebook_auto_convert_recent_posts(int $minutes = 10): array
+{
+    $minutes = max(1, $minutes);
+    $tz = facebook_timezone();
+    $cutoff = (new DateTimeImmutable('now', $tz))->modify('-' . $minutes . ' minutes')->format('Y-m-d H:i:s');
+
+    $table = cs_table('facebook_posts');
+    $stmt = db()->prepare(
+        "SELECT id FROM `{$table}`
+         WHERE cs_post_id IS NULL
+           AND message IS NOT NULL AND TRIM(message) <> ''
+           AND fb_created_time IS NOT NULL
+           AND fb_created_time >= ?
+         ORDER BY fb_created_time ASC, id ASC"
+    );
+    $stmt->execute([$cutoff]);
+    $ids = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+
+    $result = facebook_auto_convert_new_posts($ids);
+    $result['candidates'] = count($ids);
+    return $result;
+}
+
+/**
+ * Immediate catch-up sync when auto-post is turned on:
+ * sync posts, convert qualifying posts from the last 10 minutes, apply comments, refresh bodies.
+ *
+ * @return array<string, mixed>
+ */
+function facebook_auto_post_bootstrap_sync(): array
+{
+    facebook_ensure_auto_post_schema();
+    facebook_ensure_sync_logs_schema();
+
+    try {
+        $sync = facebook_sync_posts(20);
+        $autoConvert = facebook_auto_convert_recent_posts(10);
+        $commentsAfter = facebook_sync_comments_for_converted_posts();
+        $applyComments = facebook_apply_unapplied_comments_for_converted_posts();
+        $bodyRefresh = facebook_refresh_bodies_within_hours(6);
+        facebook_cron_mark_ran();
+
+        $result = [
+            'ok' => true,
+            'sync' => $sync,
+            'auto_convert' => $autoConvert,
+            'comments_after_convert' => $commentsAfter,
+            'apply_comments' => $applyComments,
+            'body_refresh' => $bodyRefresh,
+            'last_run' => settings_get('fb_cron_last_run'),
+        ];
+
+        facebook_sync_log_write(facebook_sync_log_from_results(
+            'auto-post',
+            $sync,
+            $autoConvert,
+            $applyComments,
+            $bodyRefresh,
+            $commentsAfter,
+            true,
+            null
+        ));
+
+        return $result;
+    } catch (Throwable $e) {
+        facebook_sync_log_write([
+            'source' => 'auto-post',
+            'posts_created' => 0,
+            'posts_updated' => 0,
+            'comments_new' => 0,
+            'triggers_processed' => 0,
+            'failures' => 1,
+            'ok' => false,
+            'error_message' => $e->getMessage(),
+        ]);
+        throw $e;
+    }
 }
 
 /**
@@ -562,47 +1129,87 @@ function facebook_sync_comments_for_post(int $facebookPostRowId): array
 /**
  * Page-authored comments for a CMS post, chronological (oldest first).
  *
+ * @param bool $onlyUnapplied When true, only comments with applied_at IS NULL.
  * @return list<array<string, mixed>>
  */
-function facebook_page_comments_for_cs_post(int $csPostId): array
+function facebook_page_comments_for_cs_post(int $csPostId, bool $onlyUnapplied = false): array
 {
     $fb = facebook_post_by_cs_post_id($csPostId);
     if ($fb === null) {
         return [];
     }
     $table = cs_table('facebook_comments');
-    $stmt = db()->prepare(
-        "SELECT * FROM `{$table}`
-         WHERE facebook_post_id = ? AND is_page = 1
-         ORDER BY fb_created_time ASC, id ASC"
-    );
+    $sql = "SELECT * FROM `{$table}`
+         WHERE facebook_post_id = ? AND is_page = 1";
+    if ($onlyUnapplied) {
+        $sql .= ' AND applied_at IS NULL';
+    }
+    $sql .= ' ORDER BY fb_created_time ASC, id ASC';
+    $stmt = db()->prepare($sql);
     $stmt->execute([(int) $fb['id']]);
     return $stmt->fetchAll();
 }
 
 /**
+ * Mark a local Facebook comment row as applied to the CMS post.
+ */
+function facebook_comment_mark_applied(int $commentRowId, ?string $appliedAt = null): void
+{
+    if ($commentRowId <= 0) {
+        return;
+    }
+    $table = cs_table('facebook_comments');
+    if ($appliedAt === null || $appliedAt === '') {
+        $appliedAt = (new DateTimeImmutable('now', facebook_timezone()))->format('Y-m-d H:i:s');
+    }
+    $stmt = db()->prepare(
+        "UPDATE `{$table}` SET applied_at = ? WHERE id = ? AND applied_at IS NULL"
+    );
+    $stmt->execute([$appliedAt, $commentRowId]);
+}
+
+/**
  * Apply Page UPDATE | / CLEARED | comments onto a CMS incident post.
- * Multiple CLEARED comments: latest (by comment time) wins.
+ * Only processes comments not yet marked applied. Already-cleared posts ignore
+ * further CLEARED comments (comment is still marked applied).
  *
- * @return array{updates: int, cleared: bool}
+ * @return array{updates: int, cleared: bool, skipped: int}
  */
 function facebook_apply_page_comments_to_post(int $csPostId): array
 {
-    $comments = facebook_page_comments_for_cs_post($csPostId);
+    $post = posts_find($csPostId);
+    if ($post === null) {
+        return ['updates' => 0, 'cleared' => false, 'skipped' => 0];
+    }
+
+    $alreadyCleared = trim((string) ($post['cleared_at'] ?? '')) !== '';
+    $comments = facebook_page_comments_for_cs_post($csPostId, true);
     $updates = 0;
-    $clearedAt = null;
+    $cleared = false;
+    $skipped = 0;
+    $now = (new DateTimeImmutable('now', facebook_timezone()))->format('Y-m-d H:i:s');
 
     foreach ($comments as $comment) {
+        $commentId = (int) ($comment['id'] ?? 0);
         $message = (string) ($comment['message'] ?? '');
         $created = trim((string) ($comment['fb_created_time'] ?? ''));
-        if ($created === '') {
+        $type = facebook_comment_action_type($message);
+
+        if ($type === null) {
+            // Non-action Page comments are ignored (not marked applied).
+            $skipped++;
             continue;
         }
 
-        $type = facebook_comment_action_type($message);
+        if ($created === '') {
+            $skipped++;
+            continue;
+        }
+
         if ($type === 'update') {
             $body = facebook_comment_update_text($message);
             if ($body === '') {
+                $skipped++;
                 continue;
             }
             posts_add_update($csPostId, [
@@ -611,22 +1218,138 @@ function facebook_apply_page_comments_to_post(int $csPostId): array
                 'created_at' => $created,
             ]);
             $updates++;
+            if ($commentId > 0) {
+                facebook_comment_mark_applied($commentId, $now);
+            }
         } elseif ($type === 'cleared') {
-            $clearedAt = $created;
+            if ($alreadyCleared) {
+                // Ignore later CLEARED when post is already cleared.
+                if ($commentId > 0) {
+                    facebook_comment_mark_applied($commentId, $now);
+                }
+                $skipped++;
+                continue;
+            }
+            $table = posts_table();
+            $stmt = db()->prepare(
+                "UPDATE `{$table}` SET cleared_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+            );
+            $stmt->execute([$created, $csPostId]);
+            $alreadyCleared = true;
+            $cleared = true;
+            if ($commentId > 0) {
+                facebook_comment_mark_applied($commentId, $now);
+            }
         }
-    }
-
-    if ($clearedAt !== null) {
-        $table = posts_table();
-        $stmt = db()->prepare(
-            "UPDATE `{$table}` SET cleared_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
-        );
-        $stmt->execute([$clearedAt, $csPostId]);
     }
 
     return [
         'updates' => $updates,
-        'cleared' => $clearedAt !== null,
+        'cleared' => $cleared,
+        'skipped' => $skipped,
+    ];
+}
+
+/**
+ * Apply unapplied Page UPDATE/CLEARED comments for every converted Facebook post.
+ *
+ * @return array{posts: int, updates: int, cleared: int, skipped: int, errors: int}
+ */
+function facebook_apply_unapplied_comments_for_converted_posts(): array
+{
+    $table = cs_table('facebook_posts');
+    $stmt = db()->query(
+        "SELECT cs_post_id FROM `{$table}` WHERE cs_post_id IS NOT NULL ORDER BY id ASC"
+    );
+    $ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+    $posts = 0;
+    $updates = 0;
+    $cleared = 0;
+    $skipped = 0;
+    $errors = 0;
+
+    foreach ($ids as $csPostId) {
+        $posts++;
+        try {
+            $result = facebook_apply_page_comments_to_post((int) $csPostId);
+            $updates += $result['updates'];
+            if ($result['cleared']) {
+                $cleared++;
+            }
+            $skipped += $result['skipped'];
+        } catch (Throwable) {
+            $errors++;
+        }
+    }
+
+    return [
+        'posts' => $posts,
+        'updates' => $updates,
+        'cleared' => $cleared,
+        'skipped' => $skipped,
+        'errors' => $errors,
+    ];
+}
+
+/**
+ * Refresh CMS body text from Facebook message for converted posts whose
+ * fb_created_time is within the last $hours hours. Title and category are unchanged.
+ *
+ * @return array{checked: int, updated: int, errors: int}
+ */
+function facebook_refresh_bodies_within_hours(int $hours = 6): array
+{
+    $hours = max(1, $hours);
+    $tz = facebook_timezone();
+    $cutoff = (new DateTimeImmutable('now', $tz))->modify('-' . $hours . ' hours')->format('Y-m-d H:i:s');
+
+    $fbTable = cs_table('facebook_posts');
+    $postsTable = posts_table();
+    $stmt = db()->prepare(
+        "SELECT fp.id AS fb_row_id, fp.message, fp.fb_created_time, fp.cs_post_id, p.body AS cms_body
+         FROM `{$fbTable}` fp
+         INNER JOIN `{$postsTable}` p ON p.id = fp.cs_post_id
+         WHERE fp.cs_post_id IS NOT NULL
+           AND fp.fb_created_time IS NOT NULL
+           AND fp.fb_created_time >= ?
+         ORDER BY fp.id ASC"
+    );
+    $stmt->execute([$cutoff]);
+    $rows = $stmt->fetchAll();
+
+    $checked = 0;
+    $updated = 0;
+    $errors = 0;
+    $updateBody = db()->prepare(
+        "UPDATE `{$postsTable}` SET body = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+    );
+
+    foreach ($rows as $row) {
+        $checked++;
+        try {
+            $message = trim((string) ($row['message'] ?? ''));
+            if ($message === '') {
+                continue;
+            }
+            $fbTime = !empty($row['fb_created_time']) ? (string) $row['fb_created_time'] : null;
+            $parsed = facebook_message_to_title_body($message, $fbTime);
+            $newBody = $parsed['body'];
+            $currentBody = (string) ($row['cms_body'] ?? '');
+            if ($newBody === $currentBody) {
+                continue;
+            }
+            $updateBody->execute([$newBody, (int) $row['cs_post_id']]);
+            $updated++;
+        } catch (Throwable) {
+            $errors++;
+        }
+    }
+
+    return [
+        'checked' => $checked,
+        'updated' => $updated,
+        'errors' => $errors,
     ];
 }
 
@@ -676,6 +1399,7 @@ function facebook_sync_comments_for_converted_posts(): array
 function facebook_cron_frequencies(): array
 {
     return [
+        '5m' => 'Every 5 minutes',
         '15m' => 'Every 15 minutes',
         'hourly' => 'Hourly',
         '6h' => 'Every 6 hours',
@@ -861,6 +1585,7 @@ function facebook_graph_get(string $path, array $query): array
  *   fetched: int,
  *   inserted: int,
  *   updated: int,
+ *   inserted_ids: list<int>,
  *   comments_posts: int,
  *   comments_fetched: int,
  *   comments_inserted: int,
@@ -923,6 +1648,7 @@ function facebook_sync_posts(int $limit = 20): array
     $inserted = 0;
     $updated = 0;
     $fetched = 0;
+    $insertedIds = [];
 
     foreach ($data as $post) {
         if (!is_array($post) || empty($post['id'])) {
@@ -974,6 +1700,7 @@ function facebook_sync_posts(int $limit = 20): array
                 $raw,
             ]);
             $inserted++;
+            $insertedIds[] = (int) $pdo->lastInsertId();
         }
     }
 
@@ -983,12 +1710,108 @@ function facebook_sync_posts(int $limit = 20): array
         'fetched' => $fetched,
         'inserted' => $inserted,
         'updated' => $updated,
+        'inserted_ids' => $insertedIds,
         'comments_posts' => $comments['posts'],
         'comments_fetched' => $comments['fetched'],
         'comments_inserted' => $comments['inserted'],
         'comments_updated' => $comments['updated'],
         'comments_errors' => $comments['errors'],
     ];
+}
+
+/**
+ * Scheduled Facebook sync runner (CLI/HTTP cron endpoint).
+ * When auto-post mode is on: auto-convert newly synced hashtag posts, apply
+ * unapplied Page comments, and refresh bodies for posts within 6 hours of fb_created_time.
+ *
+ * Manual Sync Now does not call this — only the scheduled endpoint does.
+ *
+ * @param array{force?: bool} $options
+ * @return array<string, mixed>
+ */
+function facebook_cron_run(array $options = []): array
+{
+    $force = !empty($options['force']);
+    facebook_ensure_auto_post_schema();
+    facebook_ensure_sync_logs_schema();
+    $cron = facebook_cron_settings();
+    $autoPost = facebook_auto_post_enabled();
+
+    if (!$cron['enabled'] && !$force) {
+        return [
+            'ok' => true,
+            'ran' => false,
+            'reason' => 'cron_disabled',
+            'auto_post' => $autoPost,
+        ];
+    }
+
+    if (!$force && !facebook_cron_is_due()) {
+        return [
+            'ok' => true,
+            'ran' => false,
+            'reason' => 'not_due',
+            'auto_post' => $autoPost,
+            'frequency' => $cron['frequency'],
+            'last_run' => $cron['last_run'],
+        ];
+    }
+
+    $source = $autoPost ? 'auto-post' : 'cron';
+
+    try {
+        $sync = facebook_sync_posts(20);
+        $result = [
+            'ok' => true,
+            'ran' => true,
+            'auto_post' => $autoPost,
+            'frequency' => $cron['frequency'],
+            'sync' => $sync,
+            'auto_convert' => null,
+            'apply_comments' => null,
+            'body_refresh' => null,
+        ];
+
+        $commentsAfter = null;
+        if ($autoPost) {
+            $result['auto_convert'] = facebook_auto_convert_new_posts($sync['inserted_ids'] ?? []);
+
+            // Newly converted posts need comments synced (convert already tries), then apply.
+            // Re-sync comments for all converted so UPDATE/CLEARED since last run are present.
+            $commentsAfter = facebook_sync_comments_for_converted_posts();
+            $result['sync']['comments_after_convert'] = $commentsAfter;
+            $result['apply_comments'] = facebook_apply_unapplied_comments_for_converted_posts();
+            $result['body_refresh'] = facebook_refresh_bodies_within_hours(6);
+        }
+
+        facebook_cron_mark_ran();
+        $result['last_run'] = settings_get('fb_cron_last_run');
+
+        facebook_sync_log_write(facebook_sync_log_from_results(
+            $source,
+            $sync,
+            is_array($result['auto_convert']) ? $result['auto_convert'] : null,
+            is_array($result['apply_comments']) ? $result['apply_comments'] : null,
+            is_array($result['body_refresh']) ? $result['body_refresh'] : null,
+            is_array($commentsAfter) ? $commentsAfter : null,
+            true,
+            null
+        ));
+
+        return $result;
+    } catch (Throwable $e) {
+        facebook_sync_log_write([
+            'source' => $source,
+            'posts_created' => 0,
+            'posts_updated' => 0,
+            'comments_new' => 0,
+            'triggers_processed' => 0,
+            'failures' => 1,
+            'ok' => false,
+            'error_message' => $e->getMessage(),
+        ]);
+        throw $e;
+    }
 }
 
 /**

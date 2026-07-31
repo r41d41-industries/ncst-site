@@ -15,21 +15,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     try {
         if ($action === 'sync') {
-            $result = facebook_sync_posts(20);
-            $newLabel = $result['inserted'] === 1 ? '1 new' : ($result['inserted'] . ' new');
-            $updatedLabel = $result['updated'] === 1 ? '1 updated' : ($result['updated'] . ' updated');
-            $msg = 'Synced ' . $result['fetched'] . ' post' . ($result['fetched'] === 1 ? '' : 's')
-                . ' with message text (' . $newLabel . ', ' . $updatedLabel . ').';
-            if ($result['comments_posts'] > 0) {
-                $msg .= ' Comments: ' . $result['comments_fetched'] . ' fetched across '
-                    . $result['comments_posts'] . ' converted post'
-                    . ($result['comments_posts'] === 1 ? '' : 's') . '.';
-                if ($result['comments_errors'] > 0) {
-                    $msg .= ' (' . $result['comments_errors'] . ' comment sync error'
-                        . ($result['comments_errors'] === 1 ? '' : 's') . '.)';
+            try {
+                $result = facebook_sync_posts(20);
+                facebook_sync_log_write(facebook_sync_log_from_results(
+                    'manual',
+                    $result,
+                    null,
+                    null,
+                    null,
+                    null,
+                    true,
+                    null
+                ));
+                $newLabel = $result['inserted'] === 1 ? '1 new' : ($result['inserted'] . ' new');
+                $updatedLabel = $result['updated'] === 1 ? '1 updated' : ($result['updated'] . ' updated');
+                $msg = 'Synced ' . $result['fetched'] . ' post' . ($result['fetched'] === 1 ? '' : 's')
+                    . ' with message text (' . $newLabel . ', ' . $updatedLabel . ').';
+                if ($result['comments_posts'] > 0) {
+                    $msg .= ' Comments: ' . $result['comments_fetched'] . ' fetched across '
+                        . $result['comments_posts'] . ' converted post'
+                        . ($result['comments_posts'] === 1 ? '' : 's') . '.';
+                    if ($result['comments_errors'] > 0) {
+                        $msg .= ' (' . $result['comments_errors'] . ' comment sync error'
+                            . ($result['comments_errors'] === 1 ? '' : 's') . '.)';
+                    }
                 }
+                flash_set('success', $msg);
+            } catch (Throwable $e) {
+                facebook_sync_log_write([
+                    'source' => 'manual',
+                    'posts_created' => 0,
+                    'posts_updated' => 0,
+                    'comments_new' => 0,
+                    'triggers_processed' => 0,
+                    'failures' => 1,
+                    'ok' => false,
+                    'error_message' => $e->getMessage(),
+                ]);
+                throw $e;
             }
-            flash_set('success', $msg);
         } elseif ($action === 'mark_seen') {
             $id = (int) ($_POST['id'] ?? 0);
             if ($id <= 0 || !facebook_posts_mark_seen($id)) {

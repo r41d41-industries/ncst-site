@@ -86,11 +86,13 @@ CREATE TABLE IF NOT EXISTS `CS_posts` (
   `gallery_id` INT UNSIGNED DEFAULT NULL,
   `playlist_id` INT UNSIGNED DEFAULT NULL,
   `published` TINYINT(1) NOT NULL DEFAULT 0,
+  `is_sticky` TINYINT(1) NOT NULL DEFAULT 0,
   `trashed_at` DATETIME DEFAULT NULL,
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `idx_cs_posts_published_created` (`published`, `created_at`),
+  KEY `idx_cs_posts_published_sticky_created` (`published`, `is_sticky`, `created_at`),
   KEY `idx_cs_posts_category` (`category`),
   KEY `idx_cs_posts_trashed_at` (`trashed_at`),
   KEY `idx_cs_posts_image_media` (`image_media_id`),
@@ -205,9 +207,28 @@ CREATE TABLE IF NOT EXISTS `CS_facebook_comments` (
   `is_page` TINYINT(1) NOT NULL DEFAULT 0,
   `fb_created_time` DATETIME DEFAULT NULL,
   `last_synced_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `applied_at` DATETIME DEFAULT NULL,
   `raw_json` MEDIUMTEXT DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_cs_facebook_comments_fb_comment_id` (`fb_comment_id`),
   KEY `idx_cs_facebook_comments_post_created` (`facebook_post_id`, `fb_created_time`),
-  KEY `idx_cs_facebook_comments_post_page` (`facebook_post_id`, `is_page`)
+  KEY `idx_cs_facebook_comments_post_page` (`facebook_post_id`, `is_page`),
+  KEY `idx_cs_facebook_comments_applied` (`facebook_post_id`, `applied_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `CS_facebook_sync_logs` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `ran_at` DATETIME NOT NULL,
+  `source` VARCHAR(16) NOT NULL,
+  `posts_created` INT UNSIGNED NOT NULL DEFAULT 0,
+  `posts_updated` INT UNSIGNED NOT NULL DEFAULT 0,
+  `comments_new` INT UNSIGNED NOT NULL DEFAULT 0,
+  `triggers_processed` INT UNSIGNED NOT NULL DEFAULT 0,
+  `failures` INT UNSIGNED NOT NULL DEFAULT 0,
+  `ok` TINYINT(1) NOT NULL DEFAULT 1,
+  `error_message` TEXT DEFAULT NULL,
+  `details_json` MEDIUMTEXT DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_cs_facebook_sync_logs_ran_at` (`ran_at`),
+  KEY `idx_cs_facebook_sync_logs_source` (`source`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

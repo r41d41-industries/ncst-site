@@ -42,6 +42,7 @@ $form = [
     'status' => $isEdit
         ? (!empty($post['published']) ? 'published' : 'draft')
         : 'draft',
+    'is_sticky' => $isEdit && !empty($post['is_sticky']) ? '1' : '0',
     'new_update_at' => '',
     'new_update_text' => '',
 ];
@@ -70,6 +71,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $form['x_url'] = trim((string) ($_POST['x_url'] ?? ''));
     $statusInput = strtolower(trim((string) ($_POST['status'] ?? 'draft')));
     $form['status'] = in_array($statusInput, $allowedStatuses, true) ? $statusInput : 'draft';
+    $form['is_sticky'] = isset($_POST['is_sticky']) && (string) $_POST['is_sticky'] === '1' ? '1' : '0';
     $form['new_update_at'] = trim((string) ($_POST['new_update_at'] ?? ''));
     $form['new_update_text'] = trim((string) ($_POST['new_update_text'] ?? ''));
     $removeImage = isset($_POST['remove_image']);
@@ -146,6 +148,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'gallery_id' => null,
                 'playlist_id' => null,
                 'published' => $published,
+                'is_sticky' => $form['is_sticky'] === '1' ? 1 : 0,
             ];
 
             if ($isEdit) {
@@ -354,6 +357,14 @@ require dirname(__DIR__) . '/includes/partials/admin_shell_start.php';
                     <option value="trash"<?= $form['status'] === 'trash' ? ' selected' : '' ?>>Trash</option>
                   </select>
                   <p class="tu-help">Draft and Published control the public feed. Trash moves the post out of the library (restore from Trash).</p>
+                </div>
+                <div class="tu-form-row">
+                  <span class="tu-label">Sticky</span>
+                  <label class="tu-check">
+                    <input type="checkbox" name="is_sticky" value="1" form="incident-form"<?= $form['is_sticky'] === '1' ? ' checked' : '' ?>>
+                    Keep at top of feed
+                  </label>
+                  <p class="tu-help">Sticky posts appear above normal chronological posts on the public feed.</p>
                 </div>
                 <div class="tu-actions">
                   <button class="tu-btn tu-btn--brand" type="submit" form="incident-form"<?= $categories === [] ? ' disabled' : '' ?>><?= $isEdit ? 'Save changes' : 'Create incident' ?></button>

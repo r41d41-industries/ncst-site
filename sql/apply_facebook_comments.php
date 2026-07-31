@@ -35,11 +35,13 @@ if (!facebook_comments_table_exists($pdo, $table)) {
           `is_page` TINYINT(1) NOT NULL DEFAULT 0,
           `fb_created_time` DATETIME DEFAULT NULL,
           `last_synced_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          `applied_at` DATETIME DEFAULT NULL,
           `raw_json` MEDIUMTEXT DEFAULT NULL,
           PRIMARY KEY (`id`),
           UNIQUE KEY `uq_cs_facebook_comments_fb_comment_id` (`fb_comment_id`),
           KEY `idx_cs_facebook_comments_post_created` (`facebook_post_id`, `fb_created_time`),
-          KEY `idx_cs_facebook_comments_post_page` (`facebook_post_id`, `is_page`)
+          KEY `idx_cs_facebook_comments_post_page` (`facebook_post_id`, `is_page`),
+          KEY `idx_cs_facebook_comments_applied` (`facebook_post_id`, `applied_at`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     );
     echo "Created {$table} table.\n";

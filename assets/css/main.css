@@ -314,6 +314,19 @@ img {
   min-width: 0;
 }
 
+.post__sticky-label {
+  display: inline-block;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  padding: 5px 9px;
+  font-size: 11px;
+  letter-spacing: 1.1px;
+  line-height: 1.5;
+  text-transform: uppercase;
+  color: var(--muted, #6b7280);
+  opacity: 0.9;
+}
+
 .badge {
   border: 1px solid currentColor;
   border-radius: 4px;

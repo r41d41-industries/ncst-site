@@ -77,7 +77,25 @@ Default seed admin (change after first login):
 
 ### Migrations
 
-Fresh installs can use `sql/schema.sql` alone. Existing databases may need the incremental scripts under `sql/migrate_*.sql` (social URLs, post updates, event datetimes, read-more URL, recorded/expires, article body). Apply any that have not already been run.
+Fresh installs can use `sql/schema.sql` alone. Existing databases may need the incremental scripts under `sql/migrate_*.sql` (social URLs, post updates, event datetimes, read-more URL, recorded/expires, article body, Facebook sync). Apply any that have not already been run.
+
+Facebook auto-post (comment `applied_at` tracking):
+
+```bash
+php sql/apply_facebook_auto_post.php
+```
+
+### Facebook Sync cron
+
+With **Settings → Facebook Sync → Cron** enabled, run the scheduled runner from system cron (every 5 minutes is fine; PHP enforces the configured frequency):
+
+```bash
+php cron/facebook_sync.php
+```
+
+Optional HTTP trigger (set `CRON_SECRET` in `.env`): `/cron/facebook_sync.php?secret=…`
+
+When **Auto-post** mode is on, each scheduled run also converts newly synced hashtag posts, applies Page `UPDATE |` / `CLEARED |` comments, and refreshes body text for posts within 6 hours of `fb_created_time`. Manual Sync Now does not run those auto-post steps.
 
 ## Layout
 

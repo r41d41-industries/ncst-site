@@ -8,7 +8,7 @@ Practical steps to ship the NCST Main Feed app to production via FTP.
 |------|--------|
 | Public URL | `https://www.cowetascanner.com` |
 | FTP document root | `httpdocs/` (Plesk-style; FTP root also has `error_docs/`, `logs/`) |
-| App layout | Local project root mirrors `httpdocs/` (PHP at root, plus `admin/`, `api/`, `article/`, `assets/`, `includes/`, `sql/`) |
+| App layout | Local project root mirrors `httpdocs/` (PHP at root, plus `admin/`, `api/`, `article/`, `assets/`, `includes/`, `sql/`, `cron/`, `scripts/`) |
 
 ## Credentials (local only)
 
@@ -34,7 +34,7 @@ Production DB settings live in the **server** `.env` under `httpdocs/` (`DB_*`, 
 Upload into `httpdocs/`:
 
 - Root PHP: `index.php`
-- Trees: `admin/`, `api/`, `article/`, `assets/` (CSS/JS/img; see uploads note), `includes/`, `sql/` (apply scripts + `.htaccess`)
+- Trees: `admin/`, `api/`, `article/`, `assets/` (CSS/JS/img; see uploads note), `includes/`, `sql/` (apply scripts + `.htaccess`), `cron/`, `scripts/`
 
 Skip replacing remote user media unless you mean to. Prefer **not** uploading local `assets/uploads/**` binaries (keep remote uploads; `.gitkeep` markers are fine if needed).
 
@@ -45,9 +45,19 @@ Skip replacing remote user media unless you mean to. Prefer **not** uploading lo
 - Sibling dirs under `httpdocs/`: **`2/`**, **`advertising/`**, **`bid/`**, **`dev/`** — never overwrite, rename, or delete these
 - Do not FTP-delete the whole `httpdocs/` tree
 
-## FTP upload (PowerShell pattern)
+## FTP upload
 
-No dedicated `deploy` script in-repo. Use passive FTP from PowerShell (`FtpWebRequest`), or an equivalent (`curl`, WinSCP, FileZilla) with the same rules.
+### Quick deploy (PowerShell script)
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-ftp.ps1
+```
+
+`scripts/deploy-ftp.ps1` reads `FTP_*` from `.env`, uploads into `httpdocs/`, and never prints secrets.
+
+### Manual pattern
+
+Use passive FTP from PowerShell (`FtpWebRequest`), or an equivalent (`curl`, WinSCP, FileZilla) with the same rules.
 
 Sketch (credentials from `.env`; expand path filters as needed):
 
@@ -64,7 +74,7 @@ Expect on the order of ~100 app files for a full sync.
 
 ## Database migrations
 
-MySQL is **not** reachable from your PC on port 3306. `sql/` is denied to the web (`.htaccess`). Apply pending migrations with a **temporary token-gated PHP runner** in `httpdocs/`, then **delete it immediately**.
+MySQL is **not** reachable from your PC on port 3306. `sql/` is denied to the web (`.htaccess`). Apply pending migrations with a **temporary token-gated PHP runner** in `httpdocs/`, then **delete it immediately**. On a host with shell PHP, you can also run `php sql/apply_….php` directly.
 
 ### Apply script order
 
@@ -76,8 +86,18 @@ Run one script per request (each `require`s bootstrap; do not batch-include all 
 4. `sql/apply_posts_trash.php`
 5. `sql/apply_shortcodes_footnotes.php`
 6. `sql/apply_posts_gallery_playlist.php`
+7. `sql/apply_facebook_posts.php`
+8. `sql/apply_facebook_convert.php`
+9. `sql/apply_facebook_comments.php`
+10. `sql/apply_facebook_auto_post.php`
+11. `sql/apply_facebook_sync_logs.php`
+12. `sql/apply_posts_sticky.php`
+
+Optional one-shots (only when needed): `sql/apply_facebook_created_at_backfill.php`, `sql/apply_facebook_eastern_times.php`.
 
 Scripts are idempotent (safe to re-run; they print “already present” when done).
+
+`facebook_ensure_auto_post_schema()` also adds `CS_facebook_comments.applied_at` idempotently when cron/auto-post admin runs.
 
 ### Runner pattern
 
@@ -110,6 +130,8 @@ All should return **200** (or expected JSON) with no PHP fatals in the body:
 | Feed API | `/api/feed.php` → `"ok":true` |
 | Playlist JS (asset) | `/assets/js/article-playlist.js` |
 | Gallery JS (asset) | `/assets/js/article-gallery.js` |
+| Facebook auto-post | `/admin/settings/facebook/auto-post.php` |
+| Facebook cron | `/admin/settings/facebook/cron.php` |
 | Migrate runner gone | `/_cs_migrate_once.php` → **404** |
 
 Notes:
@@ -121,7 +143,7 @@ Optional browser check: open home + one article; confirm no console errors on co
 
 ## Tools used successfully
 
-- **PowerShell** + `System.Net.FtpWebRequest` (list, mkdir, upload, delete, size)
+- **PowerShell** + `System.Net.FtpWebRequest` (list, mkdir, upload, delete, size), including `scripts/deploy-ftp.ps1`
 - **`Invoke-WebRequest`** for HTTPS smoke tests and migration runner calls
 - Chrome DevTools / browser for visual confirmation (optional)
 
